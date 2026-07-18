@@ -1,0 +1,16 @@
+target/
+*.class
+*.jar
+!**/maven-wrapper.jar
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+.DS_Store
+Thumbs.db
+.env
+*.local
+CLAUDE.md
+.claude/
