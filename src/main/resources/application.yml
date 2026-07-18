@@ -25,3 +25,5 @@ provisioning:
     donor-response-timeout: PT30M
   reconciliation:
     stuck-threshold: PT15M
+  bulk-sim:
+    default-rollback-threshold: 0.2

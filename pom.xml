@@ -13,14 +13,14 @@
 
     <groupId>com.jihedapps</groupId>
     <artifactId>bpmn-provisioning-patterns</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
     <packaging>jar</packaging>
 
     <name>bpmn-provisioning-patterns</name>
     <description>
         Executable Camunda + Spring Boot + Kafka orchestration patterns modeled on real telecom
-        provisioning: a multi-operator number portability saga with SLA timeouts, compensation on
-        rejection, a human review task, and a reconciliation sweep for sagas that got stuck — not
+        provisioning: a multi-operator number portability saga, a reconciliation sweep for stuck
+        sagas, and a bulk SIM provisioning saga with threshold-based batch compensation — not
         another pizza-order demo.
     </description>
     <url>https://github.com/jihedbfr-art/bpmn-provisioning-patterns</url>
