@@ -1,0 +1,107 @@
+# bpmn-provisioning-patterns
+
+[![CI](https://github.com/jihedbfr-art/bpmn-provisioning-patterns/actions/workflows/ci.yml/badge.svg)](https://github.com/jihedbfr-art/bpmn-provisioning-patterns/actions)
+
+Most public Camunda examples are pizza orders: order placed, payment charged, pizza delivered,
+the end. Real orchestration has none of that tidiness — external systems that don't answer,
+SLAs that force a decision anyway, and rollbacks that have to undo work that already happened.
+This repo is one executable process built to those constraints instead: a multi-operator number
+portability saga, modeled on how it actually works between telecom operators, not a diagram made
+up for a slide.
+
+## The process
+
+A subscriber asks to move their number from a donor operator to a recipient operator.
+`number-portability-saga.bpmn`:
+
+1. **Validate the request** — msisdn and both operators present, donor and recipient not the
+   same operator. Fails loudly (not silently) on bad input.
+2. **Notify the donor operator** — publishes a Kafka event. In a real deployment this is where a
+   message would cross an inter-operator integration boundary (SOAP/REST gateway, MNP clearing
+   house, whatever the market uses); here it's a Kafka topic standing in for that boundary.
+3. **Wait for the donor's response — with a hard SLA.** Modeled as an embedded subprocess (a
+   message intermediate catch event) with a boundary timer event on it. If the donor answers in
+   time, the message wins. If not, the timer fires and the saga takes the same path as an
+   explicit rejection — a real regulatory SLA doesn't care *why* the donor didn't answer, only
+   that they didn't.
+4. **Accepted** → activate on the recipient network, notify completion, done.
+   **Rejected or timed out** → compensate (roll back anything provisioned so far) → a human
+   **Manual Review** task, because a real rejection usually needs a person to look at it before
+   the case is closed, not just an automatic retry.
+
+## Why an embedded subprocess for the timeout, not two separate paths
+
+A boundary timer event has to attach to an activity, not to a bare message catch event, so the
+"wait for a message with a timeout" pattern needs the catch event wrapped in a subprocess with
+the timer on the subprocess boundary. It's a few more BPMN elements than the naive version, but
+it means the timeout and the rejection converge on the exact same compensation task instead of
+two copies of the same rollback logic drifting apart over time.
+
+## Stack
+
+Spring Boot 3.2, Camunda 7.23 (embedded engine — matches how this actually gets deployed in
+practice: the process engine runs inside the application, not as a separate cluster), Kafka.
+
+A note on Camunda 7: the community edition is no longer receiving new releases — Camunda's
+current investment is Camunda 8 (Zeebe), a different architecture (external broker, not
+embedded). I used 7 here anyway because the pattern in this repo — sagas, compensation,
+timeout-as-rejection, human review — is the point, not the specific engine, and it transfers
+directly to Camunda 8 or any other orchestrator. Porting to 8 is on the roadmap.
+
+## Running it
+
+```bash
+mvn spring-boot:run
+```
+
+Start a portability request:
+
+```bash
+curl -X POST localhost:8080/api/portability \
+  -H "Content-Type: application/json" \
+  -d '{"msisdn":"+21620000000","donorOperator":"Ooredoo","recipientOperator":"Orange"}'
+# {"requestId":"...", "processInstanceId":"..."}
+```
+
+Submit the donor's response (normally this would be triggered by an inbound event, not curl):
+
+```bash
+curl -X POST localhost:8080/api/portability/{requestId}/donor-response \
+  -H "Content-Type: application/json" -d '{"decision":"ACCEPTED"}'
+```
+
+Check status:
+
+```bash
+curl localhost:8080/api/portability/{requestId}
+```
+
+If nobody calls `donor-response` before the SLA in `provisioning.sla.donor-response-timeout`
+elapses, the saga times out into the same compensation + manual review path as an explicit
+rejection.
+
+## Testing
+
+```bash
+mvn test      # process tests against the embedded H2 engine — no Docker
+mvn verify     # also runs the Testcontainers check against a real Kafka broker
+```
+
+`NumberPortabilitySagaTest` drives the saga through Camunda's embedded engine and asserts on the
+actual process state — active activity IDs, historic end-activity IDs, task queries — for all
+four paths: donor acceptance, donor rejection, SLA timeout (using `ClockUtil` to fast-forward the
+engine clock and firing the boundary timer job directly, not a real `Thread.sleep`), and invalid
+input never reaching the donor notification step. `PortabilityEventPublisherIT` boots the full
+Spring context against a real Kafka broker via Testcontainers and reads back a published event
+to confirm the producer config and JSON envelope are actually right.
+
+## Roadmap
+
+- Port to Camunda 8 / Zeebe as a second, parallel implementation of the same patterns
+- A second saga: bulk SIM provisioning with partial-failure compensation
+- Reconciliation job pattern (nightly sweep for stuck sagas) — the pattern telecom ops actually
+  leans on for the cases pure event-driven design doesn't cleanly catch
+
+## License
+
+MIT — see [LICENSE](LICENSE).
