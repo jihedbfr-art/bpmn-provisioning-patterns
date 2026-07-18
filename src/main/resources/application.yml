@@ -23,3 +23,5 @@ provisioning:
     topic: number-portability-events
   sla:
     donor-response-timeout: PT30M
+  reconciliation:
+    stuck-threshold: PT15M
