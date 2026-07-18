@@ -37,6 +37,19 @@ the timer on the subprocess boundary. It's a few more BPMN elements than the nai
 it means the timeout and the rejection converge on the exact same compensation task instead of
 two copies of the same rollback logic drifting apart over time.
 
+## Reconciliation
+
+Event-driven design assumes every message eventually shows up. In practice some don't — an
+integration silently drops a callback, a reviewer forgets a manual review task exists — and the
+SLA timer alone doesn't catch that, because a saga can sit one step *before* the timer is even
+running, or in the manual review task after the timer's already done its job. `POST
+/api/reconciliation/run` sweeps every active saga, flags any sitting in the same activity longer
+than `provisioning.reconciliation.stuck-threshold` (default 15 minutes — deliberately shorter
+than the SLA itself, so ops finds out before a customer does), and publishes a
+`reconciliation.stuck_saga_detected` event per stuck instance. In production this is wired to a
+schedule (cron, Spring `@Scheduled`, whatever the deployment already uses for batch jobs); it's
+exposed as an endpoint here mainly so it's testable and triggerable on demand.
+
 ## Stack
 
 Spring Boot 3.2, Camunda 7.23 (embedded engine — matches how this actually gets deployed in
@@ -94,13 +107,14 @@ engine clock and firing the boundary timer job directly, not a real `Thread.slee
 input never reaching the donor notification step. `PortabilityEventPublisherIT` boots the full
 Spring context against a real Kafka broker via Testcontainers and reads back a published event
 to confirm the producer config and JSON envelope are actually right.
+`StuckSagaReconciliationServiceTest` covers both a fresh saga (not reported) and one pushed past
+the stuck threshold via the same clock-manipulation approach as the SLA test.
 
 ## Roadmap
 
 - Port to Camunda 8 / Zeebe as a second, parallel implementation of the same patterns
 - A second saga: bulk SIM provisioning with partial-failure compensation
-- Reconciliation job pattern (nightly sweep for stuck sagas) — the pattern telecom ops actually
-  leans on for the cases pure event-driven design doesn't cleanly catch
+- Wire the reconciliation sweep to an actual schedule instead of only a manual endpoint
 
 ## License
 

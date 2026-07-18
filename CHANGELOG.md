@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 — 2026-07-18
+
+Reconciliation sweep for stuck sagas.
+
+- `StuckSagaReconciliationService`: finds active saga instances sitting in the same activity
+  longer than `provisioning.reconciliation.stuck-threshold` (default 15 minutes), publishes a
+  `reconciliation.stuck_saga_detected` Kafka event per stuck instance.
+- `POST /api/reconciliation/run` — manual/on-demand trigger, returns the stuck sagas found.
+- Uses Camunda's `ClockUtil` rather than wall-clock time, consistent with the SLA timeout test's
+  approach, so the sweep logic is testable without a real wait.
+- Tests: a fresh saga isn't flagged, a saga pushed past the threshold is flagged and its event
+  published.
+
 ## 0.1.0 — 2026-07-18
 
 First saga: `number-portability-saga`.
