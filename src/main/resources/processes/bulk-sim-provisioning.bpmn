@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn2:definitions xmlns:bpmn2="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                    xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                    id="definitions_bulk_sim_provisioning"
+                    targetNamespace="http://jihedapps.com/bpmn/provisioning">
+
+  <bpmn2:process id="bulk-sim-provisioning" name="Bulk SIM Provisioning" isExecutable="true" camunda:historyTimeToLive="180">
+
+    <bpmn2:startEvent id="start" name="Bulk Provisioning Requested">
+      <bpmn2:outgoing>flow_start_to_provision</bpmn2:outgoing>
+    </bpmn2:startEvent>
+
+    <bpmn2:serviceTask id="provisionBatch" name="Provision Batch"
+                        camunda:delegateExpression="${provisionBatchDelegate}">
+      <bpmn2:incoming>flow_start_to_provision</bpmn2:incoming>
+      <bpmn2:outgoing>flow_provision_to_gateway</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:exclusiveGateway id="failureRateGateway" name="Failure Rate &gt; Threshold?">
+      <bpmn2:incoming>flow_provision_to_gateway</bpmn2:incoming>
+      <bpmn2:outgoing>flow_gateway_to_compensate</bpmn2:outgoing>
+      <bpmn2:outgoing>flow_gateway_to_completed</bpmn2:outgoing>
+    </bpmn2:exclusiveGateway>
+
+    <bpmn2:serviceTask id="compensateBatch" name="Compensate Batch (Deprovision)"
+                        camunda:delegateExpression="${compensateBatchDelegate}">
+      <bpmn2:incoming>flow_gateway_to_compensate</bpmn2:incoming>
+      <bpmn2:outgoing>flow_compensate_to_end</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:endEvent id="rolledBack" name="Batch Rolled Back">
+      <bpmn2:incoming>flow_compensate_to_end</bpmn2:incoming>
+    </bpmn2:endEvent>
+
+    <bpmn2:endEvent id="completed" name="Batch Completed">
+      <bpmn2:incoming>flow_gateway_to_completed</bpmn2:incoming>
+    </bpmn2:endEvent>
+
+    <bpmn2:sequenceFlow id="flow_start_to_provision" sourceRef="start" targetRef="provisionBatch" />
+    <bpmn2:sequenceFlow id="flow_provision_to_gateway" sourceRef="provisionBatch" targetRef="failureRateGateway" />
+    <bpmn2:sequenceFlow id="flow_compensate_to_end" sourceRef="compensateBatch" targetRef="rolledBack" />
+
+    <bpmn2:sequenceFlow id="flow_gateway_to_compensate" sourceRef="failureRateGateway" targetRef="compensateBatch">
+      <bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${failureRate > rollbackThreshold}</bpmn2:conditionExpression>
+    </bpmn2:sequenceFlow>
+    <bpmn2:sequenceFlow id="flow_gateway_to_completed" sourceRef="failureRateGateway" targetRef="completed">
+      <bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${failureRate &lt;= rollbackThreshold}</bpmn2:conditionExpression>
+    </bpmn2:sequenceFlow>
+
+  </bpmn2:process>
+</bpmn2:definitions>
