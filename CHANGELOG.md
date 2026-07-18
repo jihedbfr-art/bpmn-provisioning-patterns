@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 — 2026-07-18
+
+Second saga: `bulk-sim-provisioning`.
+
+- Provision a batch of SIMs; if the failure rate exceeds a configurable threshold, deprovision
+  exactly the ICCIDs that succeeded (never the ones that failed). Below the threshold, partial
+  success is accepted and failures are just reported.
+- `SimProvisioningGateway` interface + `SimulatedSimProvisioningGateway` default (always
+  succeeds — a placeholder for a real network element client).
+- `ProvisionBatchDelegate` / `CompensateBatchDelegate`, both publishing per-ICCID Kafka events.
+- REST API: start a batch, check status.
+- `BulkSimProvisioningTest`: all-success, above-threshold rollback (only successful ICCIDs
+  deprovisioned), below-threshold partial-success-accepted — gateway mocked per ICCID, no
+  randomness.
+
 ## 0.2.0 — 2026-07-18
 
 Reconciliation sweep for stuck sagas.

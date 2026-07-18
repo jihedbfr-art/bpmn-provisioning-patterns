@@ -37,6 +37,27 @@ the timer on the subprocess boundary. It's a few more BPMN elements than the nai
 it means the timeout and the rejection converge on the exact same compensation task instead of
 two copies of the same rollback logic drifting apart over time.
 
+## A second saga: bulk SIM provisioning
+
+`bulk-sim-provisioning.bpmn` is a different shape of the same underlying idea — partial failure
+in a batch, and a rule deciding whether that's acceptable or needs undoing. Provision a batch of
+SIMs; if the failure rate stays under a threshold, the batch is accepted as-is (the failures get
+reported for retry, the successes stand) — if it goes over, the whole batch gets rolled back by
+deprovisioning exactly the SIMs that succeeded, not the ones that never provisioned in the first
+place.
+
+This one loops the batch inside a single service task instead of modeling each SIM as a BPMN
+multi-instance activity. Multi-instance would make each SIM individually visible and resumable in
+Cockpit, which is a real advantage for some use cases — but aggregating parallel-instance results
+back into one failure-rate decision means fighting Camunda's per-instance variable scoping for a
+benefit this particular case doesn't need. Nobody's pausing mid-batch to inspect one SIM; the
+batch-level pass/fail is what matters here.
+
+`SimProvisioningGateway` is a placeholder for whatever the real target is — an EIR/HSS API, a
+CRM back-office call. The default implementation always succeeds; the tests control failure per
+ICCID through a mock, deliberately not through randomness (a test that fails 1 run in 20 is worse
+than no test).
+
 ## Reconciliation
 
 Event-driven design assumes every message eventually shows up. In practice some don't — an
@@ -93,6 +114,18 @@ If nobody calls `donor-response` before the SLA in `provisioning.sla.donor-respo
 elapses, the saga times out into the same compensation + manual review path as an explicit
 rejection.
 
+Start a bulk SIM provisioning batch:
+
+```bash
+curl -X POST localhost:8080/api/bulk-provisioning \
+  -H "Content-Type: application/json" \
+  -d '{"simRequests":[{"iccid":"8921...01","msisdn":"+21620000001"},{"iccid":"8921...02","msisdn":"+21620000002"}],"rollbackThreshold":0.2}'
+# {"batchId":"...", "processInstanceId":"..."}
+```
+
+`rollbackThreshold` is optional (defaults to `provisioning.bulk-sim.default-rollback-threshold`,
+0.2). Check status the same way: `curl localhost:8080/api/bulk-provisioning/{batchId}`.
+
 ## Testing
 
 ```bash
@@ -109,11 +142,14 @@ Spring context against a real Kafka broker via Testcontainers and reads back a p
 to confirm the producer config and JSON envelope are actually right.
 `StuckSagaReconciliationServiceTest` covers both a fresh saga (not reported) and one pushed past
 the stuck threshold via the same clock-manipulation approach as the SLA test.
+`BulkSimProvisioningTest` covers all-success, failure-rate-above-threshold (rollback, and only
+the successful ICCIDs get deprovisioned), and failure-rate-below-threshold (partial success
+accepted, no rollback) — with the gateway mocked to fail specific ICCIDs deterministically rather
+than randomly.
 
 ## Roadmap
 
 - Port to Camunda 8 / Zeebe as a second, parallel implementation of the same patterns
-- A second saga: bulk SIM provisioning with partial-failure compensation
 - Wire the reconciliation sweep to an actual schedule instead of only a manual endpoint
 
 ## License
