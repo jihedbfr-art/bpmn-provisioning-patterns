@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn2:definitions xmlns:bpmn2="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                    xmlns:camunda="http://camunda.org/schema/1.0/bpmn"
+                    id="definitions_number_portability"
+                    targetNamespace="http://jihedapps.com/bpmn/provisioning">
+
+  <bpmn2:message id="message_donorResponse" name="DonorResponseMessage" />
+
+  <bpmn2:process id="number-portability-saga" name="Number Portability Saga" isExecutable="true" camunda:historyTimeToLive="180">
+
+    <bpmn2:startEvent id="start" name="Portability Requested">
+      <bpmn2:outgoing>flow_start_to_validate</bpmn2:outgoing>
+    </bpmn2:startEvent>
+
+    <bpmn2:serviceTask id="validateRequest" name="Validate Request"
+                        camunda:delegateExpression="${validateRequestDelegate}">
+      <bpmn2:incoming>flow_start_to_validate</bpmn2:incoming>
+      <bpmn2:outgoing>flow_validate_to_notify</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:serviceTask id="notifyDonor" name="Notify Donor Operator"
+                        camunda:delegateExpression="${notifyDonorOperatorDelegate}">
+      <bpmn2:incoming>flow_validate_to_notify</bpmn2:incoming>
+      <bpmn2:outgoing>flow_notify_to_await</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:subProcess id="awaitDonorResponse" name="Await Donor Response">
+      <bpmn2:incoming>flow_notify_to_await</bpmn2:incoming>
+      <bpmn2:outgoing>flow_await_to_gateway</bpmn2:outgoing>
+      <bpmn2:startEvent id="awaitSubStart">
+        <bpmn2:outgoing>flow_sub_start_to_catch</bpmn2:outgoing>
+      </bpmn2:startEvent>
+      <bpmn2:intermediateCatchEvent id="donorResponseReceived" name="Donor Response Received">
+        <bpmn2:incoming>flow_sub_start_to_catch</bpmn2:incoming>
+        <bpmn2:outgoing>flow_catch_to_sub_end</bpmn2:outgoing>
+        <bpmn2:messageEventDefinition messageRef="message_donorResponse" />
+      </bpmn2:intermediateCatchEvent>
+      <bpmn2:endEvent id="awaitSubEnd">
+        <bpmn2:incoming>flow_catch_to_sub_end</bpmn2:incoming>
+      </bpmn2:endEvent>
+      <bpmn2:sequenceFlow id="flow_sub_start_to_catch" sourceRef="awaitSubStart" targetRef="donorResponseReceived" />
+      <bpmn2:sequenceFlow id="flow_catch_to_sub_end" sourceRef="donorResponseReceived" targetRef="awaitSubEnd" />
+    </bpmn2:subProcess>
+
+    <bpmn2:boundaryEvent id="slaTimeout" name="SLA Timeout" attachedToRef="awaitDonorResponse" cancelActivity="true">
+      <bpmn2:outgoing>flow_timeout_to_compensate</bpmn2:outgoing>
+      <bpmn2:timerEventDefinition>
+        <bpmn2:timeDuration xsi:type="bpmn2:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${donorResponseTimeout}</bpmn2:timeDuration>
+      </bpmn2:timerEventDefinition>
+    </bpmn2:boundaryEvent>
+
+    <bpmn2:exclusiveGateway id="donorDecisionGateway" name="Donor Decision?">
+      <bpmn2:incoming>flow_await_to_gateway</bpmn2:incoming>
+      <bpmn2:outgoing>flow_gateway_to_activate</bpmn2:outgoing>
+      <bpmn2:outgoing>flow_gateway_to_compensate</bpmn2:outgoing>
+    </bpmn2:exclusiveGateway>
+
+    <bpmn2:serviceTask id="activateOnRecipient" name="Activate On Recipient Network"
+                        camunda:delegateExpression="${activateOnRecipientDelegate}">
+      <bpmn2:incoming>flow_gateway_to_activate</bpmn2:incoming>
+      <bpmn2:outgoing>flow_activate_to_complete</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:serviceTask id="notifyCompletion" name="Notify Completion"
+                        camunda:delegateExpression="${notifyCompletionDelegate}">
+      <bpmn2:incoming>flow_activate_to_complete</bpmn2:incoming>
+      <bpmn2:outgoing>flow_complete_to_end</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:endEvent id="completed" name="Portability Completed">
+      <bpmn2:incoming>flow_complete_to_end</bpmn2:incoming>
+    </bpmn2:endEvent>
+
+    <bpmn2:serviceTask id="compensateProvisioning" name="Compensate / Rollback Provisioning"
+                        camunda:delegateExpression="${compensateProvisioningDelegate}">
+      <bpmn2:incoming>flow_gateway_to_compensate</bpmn2:incoming>
+      <bpmn2:incoming>flow_timeout_to_compensate</bpmn2:incoming>
+      <bpmn2:outgoing>flow_compensate_to_review</bpmn2:outgoing>
+    </bpmn2:serviceTask>
+
+    <bpmn2:userTask id="manualReview" name="Manual Review" camunda:candidateGroups="ops-team">
+      <bpmn2:incoming>flow_compensate_to_review</bpmn2:incoming>
+      <bpmn2:outgoing>flow_review_to_rejected</bpmn2:outgoing>
+    </bpmn2:userTask>
+
+    <bpmn2:endEvent id="rejected" name="Portability Rejected">
+      <bpmn2:incoming>flow_review_to_rejected</bpmn2:incoming>
+    </bpmn2:endEvent>
+
+    <bpmn2:sequenceFlow id="flow_start_to_validate" sourceRef="start" targetRef="validateRequest" />
+    <bpmn2:sequenceFlow id="flow_validate_to_notify" sourceRef="validateRequest" targetRef="notifyDonor" />
+    <bpmn2:sequenceFlow id="flow_notify_to_await" sourceRef="notifyDonor" targetRef="awaitDonorResponse" />
+    <bpmn2:sequenceFlow id="flow_await_to_gateway" sourceRef="awaitDonorResponse" targetRef="donorDecisionGateway" />
+    <bpmn2:sequenceFlow id="flow_timeout_to_compensate" sourceRef="slaTimeout" targetRef="compensateProvisioning" />
+
+    <bpmn2:sequenceFlow id="flow_gateway_to_activate" sourceRef="donorDecisionGateway" targetRef="activateOnRecipient">
+      <bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${donorDecision == 'ACCEPTED'}</bpmn2:conditionExpression>
+    </bpmn2:sequenceFlow>
+    <bpmn2:sequenceFlow id="flow_gateway_to_compensate" sourceRef="donorDecisionGateway" targetRef="compensateProvisioning">
+      <bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${donorDecision == 'REJECTED'}</bpmn2:conditionExpression>
+    </bpmn2:sequenceFlow>
+
+    <bpmn2:sequenceFlow id="flow_activate_to_complete" sourceRef="activateOnRecipient" targetRef="notifyCompletion" />
+    <bpmn2:sequenceFlow id="flow_complete_to_end" sourceRef="notifyCompletion" targetRef="completed" />
+    <bpmn2:sequenceFlow id="flow_compensate_to_review" sourceRef="compensateProvisioning" targetRef="manualReview" />
+    <bpmn2:sequenceFlow id="flow_review_to_rejected" sourceRef="manualReview" targetRef="rejected" />
+
+  </bpmn2:process>
+</bpmn2:definitions>
