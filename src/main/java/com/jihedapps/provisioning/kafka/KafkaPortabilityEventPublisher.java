@@ -11,7 +11,12 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-@Component
+/**
+ * @deprecated Replaced by {@link OutboxPortabilityEventPublisher}.
+ * This direct Kafka publisher caused dual-write issues because it published outside the Camunda transaction.
+ * The new outbox publisher writes to the database within the same transaction to guarantee atomicity.
+ */
+@Deprecated
 public class KafkaPortabilityEventPublisher implements PortabilityEventPublisher {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaPortabilityEventPublisher.class);
