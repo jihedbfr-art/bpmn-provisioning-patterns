@@ -83,10 +83,10 @@ public class OutboxRelay {
             } catch (Exception e) {
                 LOG.error("Failed to publish outbox record {}", record.id(), e);
                 repository.markFailed(record.id(), e.getMessage());
-                // Un enregistrement en échec déterministe (payload trop gros, etc.) bloque la tête de file pendant max-attempts cycles.
-                // C'est le bon compromis : si le broker est injoignable, on sort pour limiter le temps de transaction.
-                // Le remplacer par 'continue' empêcherait le timeout de transaction global, mais ruinerait l'incrémentation des tentatives
-                // si le broker est réellement indisponible pour tout le batch.
+                // A deterministically failing record (e.g., payload too large) blocks the head of the queue for max-attempts cycles.
+                // This is an acceptable tradeoff: if the broker is unreachable, we exit early to limit transaction time.
+                // Replacing this with 'continue' would prevent global transaction timeouts, but it would ruin attempt counting
+                // if the broker is actually down for the entire batch.
                 break; // Stop processing batch if broker is down to prevent transaction timeout
             }
         }

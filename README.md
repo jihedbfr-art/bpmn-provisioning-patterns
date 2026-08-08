@@ -59,7 +59,7 @@ A subscriber asks to move their number from a donor operator to a recipient oper
 <details>
 <summary>Not from telecom? Read this mapping</summary>
 
-Most BPMN examples are pizza orders. This repository solves real distributed systems challenges, but if telecom jargon is unfamiliar, here is the exact E-commerce equivalent:
+If telecom jargon is unfamiliar, here is the exact E-commerce equivalent:
 
 - `Validate request` → `Validate cart`
 - `Notify donor operator` → `Request payment authorization`
@@ -114,14 +114,14 @@ exposed as an endpoint here mainly so it's testable and triggerable on demand.
 
 ## Transactional Outbox & Idempotent Consumer
 
-Publishing an event to Kafka from within a Camunda transaction is a classic **dual-write problem**: if the Kafka publish succeeds but the database commit fails, a ghost event is emitted. If the DB commits but Kafka fails, the event is permanently lost.
-To fix this, we implemented the **Transactional Outbox** pattern:
-- Instead of calling `KafkaTemplate` directly, `OutboxPortabilityEventPublisher` inserts an event into a `portability_outbox` table using the **same database transaction** as the Camunda process state. Both succeed or fail atomically.
+Publishing an event to Kafka from within a Camunda transaction is a classic dual-write problem: if the Kafka publish succeeds but the database commit fails, a ghost event is emitted. If the DB commits but Kafka fails, the event is permanently lost.
+To fix this, I implemented the Transactional Outbox pattern:
+- Instead of calling `KafkaTemplate` directly, `OutboxPortabilityEventPublisher` inserts an event into a `portability_outbox` table using the same database transaction as the Camunda process state. Both succeed or fail atomically.
 - A background relay (`OutboxRelay`) polls the outbox at regular intervals (`provisioning.outbox.relay.interval`, default `PT1S`) using `SELECT ... FOR UPDATE SKIP LOCKED` to lock a batch without blocking other relay instances. Note that the relay is currently single-instance and the `SKIP LOCKED` behavior is not covered by a concurrency test.
 - The relay synchronously publishes to Kafka (`provisioning.outbox.relay.send-timeout`) and marks the row as published.
 
-On the receiving side, consuming events requires **Idempotency**. Kafka provides at-least-once delivery, meaning a donor response could be processed twice during a network partition or consumer restart.
-- We rely on a `processed_events` table with a unique constraint on `event_id`.
+On the receiving side, consuming events requires Idempotency. Kafka provides at-least-once delivery, meaning a donor response could be processed twice during a network partition or consumer restart.
+- I rely on a `processed_events` table with a unique constraint on `event_id`.
 - Before correlating the message to the process engine, `ProcessedEventRepository` tries to insert the `eventId`. A `DuplicateKeyException` means we already processed it, allowing us to safely skip it.
 - If the correlation fails due to an application or DB crash, the transaction rolls back, undoing both the `processed_events` insert and the Camunda state, guaranteeing safe replay. In case of unrecoverable correlation errors (e.g., saga already completed), it goes to a Dead Letter Topic (DLT) after 2 retries (3 attempts total).
 
@@ -129,7 +129,7 @@ On the receiving side, consuming events requires **Idempotency**. Kafka provides
 
 This repository is built to be tested against failures.
 
-| # | Manipulation | Real expected behavior |
+| # | Manipulation | What actually happens |
 |---|---|---|
 | 1 | `docker compose stop kafka` then start a saga | The saga **continues**, the notification is safely stored in the Outbox. When the broker restarts, the relay automatically publishes it. No messages lost. |
 | 2 | Start a saga then `docker compose restart app` | The instance and its SLA timer survive the restart (thanks to PostgreSQL). Try this with `mvn spring-boot:run` to see the contrast (H2 drops all state). |
