@@ -23,7 +23,7 @@ To start a saga:
 ```bash
 curl -X POST http://localhost:8080/api/portability \
   -H "Content-Type: application/json" \
-  -d '{"msisdn":"+21620000000","donorOperator":"Ooredoo","recipientOperator":"Orange","donorResponseTimeout":"PT30M"}'
+  -d '{"msisdn":"+21620000000","donorOperator":"Ooredoo","recipientOperator":"Orange"}'
 ```
 
 To submit a donor response:
@@ -142,27 +142,7 @@ Run `docker compose up -d`. This boots Kafka (KRaft), PostgreSQL, and the Spring
 
 Simply run `mvn spring-boot:run`. The application starts instantly using an in-memory H2 database. Perfect for fast inner-loop development, but all state is lost upon restart.
 
-Start a portability request:
-
-```bash
-curl -X POST localhost:8080/api/portability \
-  -H "Content-Type: application/json" \
-  -d '{"msisdn":"+21620000000","donorOperator":"Ooredoo","recipientOperator":"Orange"}'
-# {"requestId":"...", "processInstanceId":"..."}
-```
-
-Submit the donor's response (normally this would be triggered by an inbound event, not curl):
-
-```bash
-curl -X POST localhost:8080/api/portability/{requestId}/donor-response \
-  -H "Content-Type: application/json" -d '{"decision":"ACCEPTED"}'
-```
-
-Check status:
-
-```bash
-curl localhost:8080/api/portability/{requestId}
-```
+Start a portability request and submit a donor response using the same `curl` commands provided in the **Quick start** section above.
 
 If nobody calls `donor-response` before the SLA in `provisioning.sla.donor-response-timeout`
 elapses, the saga times out into the same compensation + manual review path as an explicit
@@ -183,11 +163,11 @@ curl -X POST localhost:8080/api/bulk-provisioning \
 ## Testing
 
 ```bash
-mvn test      # process tests against the embedded H2 engine — no Docker
-mvn verify     # also runs the Testcontainers check against a real Kafka broker
+mvn test       # process tests against the embedded H2 engine — no Docker
+mvn verify     # also runs the Testcontainers check against a real Kafka broker and a PostgreSQL database
 ```
 
-`NumberPortabilitySagaTest` drives the saga through Camunda's embedded engine and asserts on the
+`SagaDurabilityIT` proves that the saga instance and its SLA boundary timer survive a full application restart by closing and reopening the Spring context against the same shared Testcontainers PostgreSQL database. `NumberPortabilitySagaTest` drives the saga through Camunda's embedded engine and asserts on the
 actual process state — active activity IDs, historic end-activity IDs, task queries — for all
 four paths: donor acceptance, donor rejection, SLA timeout (using `ClockUtil` to fast-forward the
 engine clock and firing the boundary timer job directly, not a real `Thread.sleep`), and invalid
