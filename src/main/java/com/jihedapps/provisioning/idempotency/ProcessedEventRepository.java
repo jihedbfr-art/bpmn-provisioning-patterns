@@ -21,7 +21,8 @@ public class ProcessedEventRepository {
 
     /**
      * Tries to insert the event into the processed_events table.
-     * Returns true if successful, false if the eventId already exists (DuplicateKeyException).
+     * Returns true if successful. On PostgreSQL, duplicates return 0 rows via ON CONFLICT DO NOTHING.
+     * On H2, duplicates throw a DuplicateKeyException which is caught and returns false.
      * This relies entirely on the database UNIQUE constraint for idempotency, avoiding race conditions.
      */
     public boolean markProcessed(String eventId, String topic, String aggregateId) {
