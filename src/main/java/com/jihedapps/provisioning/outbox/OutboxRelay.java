@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
+import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,8 +47,8 @@ public class OutboxRelay {
                        KafkaTemplate<String, String> kafkaTemplate,
                        JdbcTemplate jdbcTemplate,
                        MeterRegistry meterRegistry,
-                       Tracer tracer,
-                       Propagator propagator,
+                       ObjectProvider<Tracer> tracerProvider,
+                       ObjectProvider<Propagator> propagatorProvider,
                        ObjectMapper mapper,
                        @Value("${provisioning.kafka.topic:number-portability-events}") String topic,
                        @Value("${provisioning.outbox.relay.send-timeout:PT6S}") Duration sendTimeout,
@@ -56,8 +57,8 @@ public class OutboxRelay {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.jdbcTemplate = jdbcTemplate;
-        this.tracer = tracer;
-        this.propagator = propagator;
+        this.tracer = tracerProvider.getIfAvailable(() -> Tracer.NOOP);
+        this.propagator = propagatorProvider.getIfAvailable(() -> Propagator.NOOP);
         this.mapper = mapper;
         this.topic = topic;
         this.sendTimeout = sendTimeout;

@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -24,11 +25,14 @@ public class OutboxPortabilityEventPublisher implements PortabilityEventPublishe
     private final Tracer tracer;
     private final Propagator propagator;
 
-    public OutboxPortabilityEventPublisher(OutboxRepository outboxRepository, ObjectMapper mapper, Tracer tracer, Propagator propagator) {
+    public OutboxPortabilityEventPublisher(OutboxRepository outboxRepository,
+                                         ObjectMapper mapper,
+                                         ObjectProvider<Tracer> tracerProvider,
+                                         ObjectProvider<Propagator> propagatorProvider) {
         this.outboxRepository = outboxRepository;
         this.mapper = mapper;
-        this.tracer = tracer;
-        this.propagator = propagator;
+        this.tracer = tracerProvider.getIfAvailable(() -> Tracer.NOOP);
+        this.propagator = propagatorProvider.getIfAvailable(() -> Propagator.NOOP);
     }
 
     @Override
