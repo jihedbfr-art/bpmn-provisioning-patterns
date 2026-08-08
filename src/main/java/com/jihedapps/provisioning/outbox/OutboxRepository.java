@@ -26,7 +26,7 @@ public class OutboxRepository {
     }
 
     public void insert(OutboxRecord record) {
-        jdbc.update("INSERT INTO portability_outbox (id, aggregate_id, event_type, payload, created_at, published_at, attempts, last_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO portability_outbox (id, aggregate_id, event_type, payload, created_at, published_at, attempts, last_error, trace_context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 record.id(),
                 record.aggregateId(),
                 record.eventType(),
@@ -34,7 +34,8 @@ public class OutboxRepository {
                 record.createdAt() != null ? Timestamp.from(record.createdAt()) : null,
                 record.publishedAt() != null ? Timestamp.from(record.publishedAt()) : null,
                 record.attempts(),
-                record.lastError());
+                record.lastError(),
+                record.traceContext());
     }
 
     public List<OutboxRecord> lockUnpublishedBatch(int limit) {
@@ -58,6 +59,7 @@ public class OutboxRepository {
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("published_at") != null ? rs.getTimestamp("published_at").toInstant() : null,
             rs.getInt("attempts"),
-            rs.getString("last_error")
+            rs.getString("last_error"),
+            rs.getString("trace_context")
     );
 }

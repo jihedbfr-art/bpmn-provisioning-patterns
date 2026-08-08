@@ -10,6 +10,7 @@ public record OutboxRecord(
         Instant createdAt,
         Instant publishedAt,
         int attempts,
-        String lastError
+        String lastError,
+        String traceContext
 ) {
 }
