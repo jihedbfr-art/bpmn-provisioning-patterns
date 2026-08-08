@@ -9,6 +9,31 @@ This repo is one executable process built to those constraints instead: a multi-
 portability saga, modeled on how it actually works between telecom operators, not a diagram made
 up for a slide.
 
+## Quick start
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+Then navigate to Camunda Cockpit: `http://localhost:8080/camunda` (credentials: `demo` / `demo`, these are dev defaults you can override with `CAMUNDA_ADMIN_PASSWORD`).
+
+To start a saga:
+
+```bash
+curl -X POST http://localhost:8080/api/portability \
+  -H "Content-Type: application/json" \
+  -d '{"msisdn":"+21620000000","donorOperator":"Ooredoo","recipientOperator":"Orange"}'
+```
+
+To submit a donor response:
+
+```bash
+curl -X POST http://localhost:8080/api/portability/{requestId}/donor-response \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"ACCEPTED"}'
+```
+
 ## The process
 
 A subscriber asks to move their number from a donor operator to a recipient operator.
@@ -28,6 +53,20 @@ A subscriber asks to move their number from a donor operator to a recipient oper
    **Rejected or timed out** → compensate (roll back anything provisioned so far) → a human
    **Manual Review** task, because a real rejection usually needs a person to look at it before
    the case is closed, not just an automatic retry.
+
+<details>
+<summary>Not from telecom? Read this mapping</summary>
+
+Most BPMN examples are pizza orders. This repository solves real distributed systems challenges, but if telecom jargon is unfamiliar, here is the exact E-commerce equivalent:
+
+- `Validate request` → `Validate cart`
+- `Notify donor operator` → `Request payment authorization`
+- `Await donor response (SLA)` → `Await payment confirmation`
+- `Activate on recipient` → `Reserve inventory`
+- `Compensate / rollback` → `Refund payment`
+- `Manual review` → `Fraud review queue`
+- `Bulk SIM batch` → `Bulk order fulfilment`
+</details>
 
 ## Why an embedded subprocess for the timeout, not two separate paths
 
@@ -71,6 +110,17 @@ than the SLA itself, so ops finds out before a customer does), and publishes a
 schedule (cron, Spring `@Scheduled`, whatever the deployment already uses for batch jobs); it's
 exposed as an endpoint here mainly so it's testable and triggerable on demand.
 
+## 🔥 Break it
+
+This repository is built to be tested against failures.
+
+| # | Manipulation | Real expected behavior |
+|---|---|---|
+| 1 | `docker compose stop kafka` then start a saga | The saga **continues** but the notification event is silently lost (logged as error). This is a known dual-write issue to be solved via the outbox pattern. |
+| 2 | Start a saga then `docker compose restart app` | The instance and its SLA timer survive the restart (thanks to PostgreSQL). Try this with H2 to see the contrast. |
+| 3 | Start a saga and never call `donor-response` | After `provisioning.sla.donor-response-timeout`, it automatically falls back to compensation + manual review, exactly like an explicit rejection. |
+| 4 | Start a SIM batch with failure rate > `rollbackThreshold` | The entire batch triggers a rollback, but only the ICCIDs that *actually succeeded* are deprovisioned. |
+
 ## Stack
 
 Spring Boot 3.2, Camunda 7.23 (embedded engine — matches how this actually gets deployed in
@@ -84,31 +134,15 @@ directly to Camunda 8 or any other orchestrator. Porting to 8 is on the roadmap.
 
 ## Running it
 
-```bash
-mvn spring-boot:run
-```
+### With Docker (Postgres, durable)
 
-Start a portability request:
+Run `docker compose up -d`. This boots Kafka (KRaft), PostgreSQL, and the Spring Boot application using the `postgres` profile. This mode is durable: sagas and their timers will survive an application restart.
 
-```bash
-curl -X POST localhost:8080/api/portability \
-  -H "Content-Type: application/json" \
-  -d '{"msisdn":"+21620000000","donorOperator":"Ooredoo","recipientOperator":"Orange"}'
-# {"requestId":"...", "processInstanceId":"..."}
-```
+### Without Docker (H2 in-memory, fastest)
 
-Submit the donor's response (normally this would be triggered by an inbound event, not curl):
+Simply run `mvn spring-boot:run`. The application starts instantly using an in-memory H2 database. Perfect for fast inner-loop development, but all state is lost upon restart.
 
-```bash
-curl -X POST localhost:8080/api/portability/{requestId}/donor-response \
-  -H "Content-Type: application/json" -d '{"decision":"ACCEPTED"}'
-```
-
-Check status:
-
-```bash
-curl localhost:8080/api/portability/{requestId}
-```
+Start a portability request and submit a donor response using the same `curl` commands provided in the **Quick start** section above.
 
 If nobody calls `donor-response` before the SLA in `provisioning.sla.donor-response-timeout`
 elapses, the saga times out into the same compensation + manual review path as an explicit
@@ -129,11 +163,11 @@ curl -X POST localhost:8080/api/bulk-provisioning \
 ## Testing
 
 ```bash
-mvn test      # process tests against the embedded H2 engine — no Docker
-mvn verify     # also runs the Testcontainers check against a real Kafka broker
+mvn test       # process tests against the embedded H2 engine — no Docker
+mvn verify     # also runs the Testcontainers check against a real Kafka broker and a PostgreSQL database
 ```
 
-`NumberPortabilitySagaTest` drives the saga through Camunda's embedded engine and asserts on the
+`SagaDurabilityIT` proves that the saga instance and its SLA boundary timer survive a full application restart by closing and reopening the Spring context against the same shared Testcontainers PostgreSQL database. `NumberPortabilitySagaTest` drives the saga through Camunda's embedded engine and asserts on the
 actual process state — active activity IDs, historic end-activity IDs, task queries — for all
 four paths: donor acceptance, donor rejection, SLA timeout (using `ClockUtil` to fast-forward the
 engine clock and firing the boundary timer job directly, not a real `Thread.sleep`), and invalid
@@ -149,6 +183,8 @@ than randomly.
 
 ## Roadmap
 
+- Transactional Outbox pattern to solve the Camunda/Kafka dual-write
+- Idempotent Kafka consumer to handle retries safely
 - Port to Camunda 8 / Zeebe as a second, parallel implementation of the same patterns
 - Wire the reconciliation sweep to an actual schedule instead of only a manual endpoint
 
