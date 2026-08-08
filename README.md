@@ -110,16 +110,30 @@ than the SLA itself, so ops finds out before a customer does), and publishes a
 schedule (cron, Spring `@Scheduled`, whatever the deployment already uses for batch jobs); it's
 exposed as an endpoint here mainly so it's testable and triggerable on demand.
 
+## Transactional Outbox & Idempotent Consumer
+
+Publishing an event to Kafka from within a Camunda transaction is a classic **dual-write problem**: if the Kafka publish succeeds but the database commit fails, a ghost event is emitted. If the DB commits but Kafka fails, the event is permanently lost.
+To fix this, we implemented the **Transactional Outbox** pattern:
+- Instead of calling `KafkaTemplate` directly, `OutboxPortabilityEventPublisher` inserts an event into a `portability_outbox` table using the **same database transaction** as the Camunda process state. Both succeed or fail atomically.
+- A background relay (`OutboxRelay`) polls the outbox at regular intervals (`provisioning.outbox.relay.interval`, default `PT1S`) using `SELECT ... FOR UPDATE SKIP LOCKED` to lock a batch without blocking other relay instances.
+- The relay synchronously publishes to Kafka (`provisioning.outbox.relay.send-timeout`) and marks the row as published.
+
+On the receiving side, consuming events requires **Idempotency**. Kafka provides at-least-once delivery, meaning a donor response could be processed twice during a network partition or consumer restart.
+- We rely on a `processed_events` table with a unique constraint on `event_id`.
+- Before correlating the message to the process engine, `ProcessedEventRepository` tries to insert the `eventId`. A `DuplicateKeyException` means we already processed it, allowing us to safely skip it.
+- If the correlation fails due to an application or DB crash, the transaction rolls back, undoing both the `processed_events` insert and the Camunda state, guaranteeing safe replay. In case of unrecoverable correlation errors (e.g., saga already completed), it goes to a Dead Letter Topic (DLT) after 3 retries.
+
 ## 🔥 Break it
 
 This repository is built to be tested against failures.
 
 | # | Manipulation | Real expected behavior |
 |---|---|---|
-| 1 | `docker compose stop kafka` then start a saga | The saga **continues** but the notification event is silently lost (logged as error). This is a known dual-write issue to be solved via the outbox pattern. |
+| 1 | `docker compose stop kafka` then start a saga | The saga **continues**, the notification is safely stored in the Outbox. When the broker restarts, the relay automatically publishes it. No messages lost. |
 | 2 | Start a saga then `docker compose restart app` | The instance and its SLA timer survive the restart (thanks to PostgreSQL). Try this with H2 to see the contrast. |
 | 3 | Start a saga and never call `donor-response` | After `provisioning.sla.donor-response-timeout`, it automatically falls back to compensation + manual review, exactly like an explicit rejection. |
 | 4 | Start a SIM batch with failure rate > `rollbackThreshold` | The entire batch triggers a rollback, but only the ICCIDs that *actually succeeded* are deprovisioned. |
+| 5 | Call `donor-response` multiple times for the same `requestId` | Idempotent consumer guarantees the process advances only once. Subsequent messages are skipped based on `processed_events`. |
 
 ## Stack
 
@@ -183,8 +197,6 @@ than randomly.
 
 ## Roadmap
 
-- Transactional Outbox pattern to solve the Camunda/Kafka dual-write
-- Idempotent Kafka consumer to handle retries safely
 - Port to Camunda 8 / Zeebe as a second, parallel implementation of the same patterns
 - Wire the reconciliation sweep to an actual schedule instead of only a manual endpoint
 
