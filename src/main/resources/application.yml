@@ -8,6 +8,16 @@ spring:
     password: ""
   kafka:
     bootstrap-servers: localhost:9092
+    consumer:
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      isolation-level: read_committed
+    listener:
+      ack-mode: RECORD
+      concurrency: 1
+  flyway:
+    table: flyway_provisioning_history
+    baseline-on-migrate: true
 
 camunda:
   bpm:
@@ -21,6 +31,13 @@ camunda:
 provisioning:
   kafka:
     topic: number-portability-events
+    donor-response-topic: donor-response-events
+  outbox:
+    relay:
+      enabled: true
+      interval: PT1S
+      batch-size: 50
+      send-timeout: PT5S
   sla:
     donor-response-timeout: PT30M
   reconciliation:
