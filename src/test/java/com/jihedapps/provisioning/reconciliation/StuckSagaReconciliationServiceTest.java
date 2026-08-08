@@ -7,7 +7,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.Date;
 import java.util.List;
@@ -15,7 +15,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.verify;
 
 @SpringBootTest
 class StuckSagaReconciliationServiceTest {
@@ -27,8 +26,8 @@ class StuckSagaReconciliationServiceTest {
     @Autowired
     private StuckSagaReconciliationService reconciliationService;
 
-    @MockBean
-    private PortabilityEventPublisher publisher;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @AfterEach
     void resetClock() {
@@ -80,9 +79,9 @@ class StuckSagaReconciliationServiceTest {
         assertThat(report.activityId()).isEqualTo("donorResponseReceived");
         assertThat(report.stuckFor().toMinutes()).isGreaterThanOrEqualTo(20);
 
-        verify(publisher).publish(
-                org.mockito.ArgumentMatchers.eq("reconciliation.stuck_saga_detected"),
-                org.mockito.ArgumentMatchers.eq(requestId),
-                org.mockito.ArgumentMatchers.any());
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM portability_outbox WHERE event_type = 'reconciliation.stuck_saga_detected' AND payload LIKE ?",
+                Integer.class, "%" + requestId + "%");
+        assertThat(count).isEqualTo(1);
     }
 }
