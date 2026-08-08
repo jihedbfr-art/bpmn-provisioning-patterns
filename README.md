@@ -16,7 +16,8 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Then navigate to Camunda Cockpit: `http://localhost:8080/camunda` (credentials: `demo` / `demo`, these are dev defaults you can override with `CAMUNDA_ADMIN_PASSWORD`).
+Then navigate to Camunda Cockpit: `http://localhost:8080/camunda` (credentials: `demo` / `demo`, dev defaults configurable via `CAMUNDA_ADMIN_PASSWORD`).
+Open Jaeger UI to inspect distributed traces: `http://localhost:16686`.
 
 To start a saga:
 
@@ -121,7 +122,15 @@ To fix this, we implemented the **Transactional Outbox** pattern:
 On the receiving side, consuming events requires **Idempotency**. Kafka provides at-least-once delivery, meaning a donor response could be processed twice during a network partition or consumer restart.
 - We rely on a `processed_events` table with a unique constraint on `event_id`.
 - Before correlating the message to the process engine, `ProcessedEventRepository` tries to insert the `eventId`. A `DuplicateKeyException` means we already processed it, allowing us to safely skip it.
-- If the correlation fails due to an application or DB crash, the transaction rolls back, undoing both the `processed_events` insert and the Camunda state, guaranteeing safe replay. In case of unrecoverable correlation errors (e.g., saga already completed), it goes to a Dead Letter Topic (DLT) after 3 retries.
+- If the correlation fails due to an application or DB crash, the transaction rolls back, undoing both the `processed_events` insert and the Camunda state, guaranteeing safe replay. In case of unrecoverable correlation errors (e.g., saga already completed), it goes to a Dead Letter Topic (DLT) after 2 retries.
+
+## Tracing across the outbox
+
+Standard Spring Kafka auto-instrumentation propagates W3C trace context headers when a message is published in the same execution context as the originating call. When events pass through a transactional outbox table, that continuity breaks: the original HTTP thread writes to the database and completes its span, while a background scheduler thread (`OutboxRelay`) polls and publishes seconds or minutes later. Without explicit context preservation, the system produces three disconnected traces rather than one end-to-end view.
+
+To bridge this asynchronous boundary, I store the W3C trace context (both `traceparent` and `tracestate`) as JSON in a `trace_context` column of the `portability_outbox` table during the initial transaction. When `OutboxRelay` picks up the record, it deserializes the context, extracts the parent span, and starts a child publication span wrapped in a local tracing scope. As a result, Spring Kafka injects the originating context into Kafka headers, allowing the consumer to link its processing back to the initial saga invocation. Additionally, application logs automatically correlate `traceId` and `spanId` via MDC.
+
+I explicitly chose a parent-child span relationship over a span link. While a span link is semantically accurate for decoupled asynchronous handoffs, a parent-child relationship consolidates the entire saga into a single trace hierarchy in Jaeger. This makes execution delays or broker outages immediately visible as a time gap within one continuous trace. Note that the sampling decision is frozen inside the stored `traceparent` string at outbox insertion; an unsampled saga remains unsampled when published later.
 
 ## 🔥 Break it
 
@@ -129,7 +138,9 @@ This repository is built to be tested against failures.
 
 | # | Manipulation | Real expected behavior |
 |---|---|---|
-| 1 | `docker compose stop kafka` then start a saga | The saga **continues**, the notification is safely stored in the Outbox. When the broker restarts, the relay automatically publishes it. No messages lost. |
+| 1 | `docker compose stop kafka` then start a saga | The saga continues and the event is safely written to `portability_outbox`. When Kafka restarts, `OutboxRelay` publishes the event with its original trace context. In Jaeger (`http://localhost:16686`), the broker outage appears as a clear time gap inside a single end-to-end trace. |
+
+![Trace with outbox gap](docs/trace-with-outbox-hole.png)
 | 2 | Start a saga then `docker compose restart app` | The instance and its SLA timer survive the restart (thanks to PostgreSQL). Try this with H2 to see the contrast. |
 | 3 | Start a saga and never call `donor-response` | After `provisioning.sla.donor-response-timeout`, it automatically falls back to compensation + manual review, exactly like an explicit rejection. |
 | 4 | Start a SIM batch with failure rate > `rollbackThreshold` | The entire batch triggers a rollback, but only the ICCIDs that *actually succeeded* are deprovisioned. |

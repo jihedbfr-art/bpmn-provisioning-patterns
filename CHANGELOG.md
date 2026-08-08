@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — 2026-08-08
+
+Distributed Tracing across the Transactional Outbox.
+
+- Propagate W3C trace context across the outbox boundary by storing `trace_context` JSON in `portability_outbox`.
+- Restore original trace context in `OutboxRelay` before publishing, creating a parent-child span relation.
+- Jaeger service in `docker-compose.yml` (`http://localhost:16686`) for visual trace inspection.
+- MDC logging with `traceId` and `spanId`.
+- `TracePropagationIT` proving trace ID persistence, parent-child span linkage, and resilience across broker outages.
+
+## 0.5.0 — 2026-08-08
+
+Transactional Outbox & Idempotent Consumer patterns.
+
+- Transactional Outbox table (`portability_outbox`) and background polling relay (`OutboxRelay`).
+- Idempotent consumer with `processed_events` unique constraint.
+
 ## 0.4.0 — 2026-08-08
 
 Executable docker environment and durability proofs.
