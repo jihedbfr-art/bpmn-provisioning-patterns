@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
-import org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpTracingAutoConfiguration;
+import org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -47,7 +47,7 @@ import static org.awaitility.Awaitility.await;
                 "provisioning.outbox.relay.enabled=false"
         }
 )
-@ImportAutoConfiguration(exclude = OtlpTracingAutoConfiguration.class)
+@ImportAutoConfiguration(exclude = OtlpAutoConfiguration.class)
 @ActiveProfiles("postgres")
 class TracePropagationIT {
 
