@@ -12,9 +12,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.kafka.KafkaContainer;
 
 import java.util.Date;
 import java.util.Map;
@@ -25,7 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SagaDurabilityIT {
 
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1")).withKraft();
+    static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
 
     @BeforeAll
     static void startContainers() {
@@ -106,6 +105,7 @@ class SagaDurabilityIT {
                 .profiles("postgres")
                 .properties(
                         "camunda.bpm.job-execution.enabled=false",
+                        "spring.jmx.enabled=false", // Prevent JMX conflicts when running multiple ITs
                         "server.port=0", // Use random port to avoid conflicts across restarts
                         "spring.datasource.url=" + postgres.getJdbcUrl(),
                         "spring.datasource.username=" + postgres.getUsername(),
