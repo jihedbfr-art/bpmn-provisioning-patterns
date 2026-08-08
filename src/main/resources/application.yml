@@ -14,8 +14,8 @@ camunda:
     database:
       schema-update: true
     admin-user:
-      id: demo
-      password: demo
+      id: ${CAMUNDA_ADMIN_USER:demo}
+      password: ${CAMUNDA_ADMIN_PASSWORD:demo}
     history-level: full
 
 provisioning:
