@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-08-08
+
+Executable docker environment and durability proofs.
+
+- `docker-compose.yml` environment containing PostgreSQL, KRaft Kafka, and a multi-stage Dockerfile for the app.
+- Camunda Webapps exposed on `/camunda` and credentials externalized.
+- Default to H2 for tests and fastest local dev, Postgres via `spring.profiles.active=postgres` for durable runs.
+- `SagaDurabilityIT` proving that active saga instances and their SLA boundary timers survive a full application restart by sharing a Testcontainers PostgreSQL database.
+- E-commerce domain mapping added to README for easier onboarding.
+
 ## 0.3.0 — 2026-07-18
 
 Second saga: `bulk-sim-provisioning`.

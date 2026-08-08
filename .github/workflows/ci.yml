@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -19,8 +20,5 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Process tests (embedded Camunda engine, no Docker)
-        run: mvn -B test
-
-      - name: Package + Testcontainers Kafka check
+      - name: Package + Testcontainers Postgres & Kafka check
         run: mvn -B verify
