@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SagaDurabilityIT {
 
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1"));
+    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.6.1")).withKraft();
 
     @BeforeAll
     static void startContainers() {
@@ -105,6 +105,7 @@ class SagaDurabilityIT {
         return new SpringApplicationBuilder(ProvisioningApplication.class)
                 .profiles("postgres")
                 .properties(
+                        "camunda.bpm.job-execution.enabled=false",
                         "server.port=0", // Use random port to avoid conflicts across restarts
                         "spring.datasource.url=" + postgres.getJdbcUrl(),
                         "spring.datasource.username=" + postgres.getUsername(),
