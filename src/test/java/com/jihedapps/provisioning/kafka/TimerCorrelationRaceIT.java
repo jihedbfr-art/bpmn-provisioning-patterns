@@ -70,7 +70,9 @@ class TimerCorrelationRaceIT {
     ObjectMapper objectMapper;
 
     @Test
-    void shouldIgnoreMessageIfTimerAlreadyTriggered() throws Exception {
+    void shouldNotThrowWhenDirectListenerCalledAfterTimerTrigger() throws Exception {
+        // Note: This test calls listener.onDonorResponse(payload) directly to prove the decision branch logic
+        // and boundary event correlation. It does not test the full Kafka ingestion pipeline.
         String requestId = UUID.randomUUID().toString();
         
         // Start process with 1 second timeout

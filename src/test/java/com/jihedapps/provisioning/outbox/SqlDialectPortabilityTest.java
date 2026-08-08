@@ -1,4 +1,4 @@
-package com.jihedapps.provisioning.reconciliation;
+package com.jihedapps.provisioning.outbox;
 
 import com.jihedapps.provisioning.idempotency.ProcessedEventRepository;
 import com.jihedapps.provisioning.outbox.OutboxRepository;
