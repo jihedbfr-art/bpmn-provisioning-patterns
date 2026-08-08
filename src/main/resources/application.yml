@@ -15,9 +15,12 @@ spring:
       value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
         spring.deserializer.value.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
+    template:
+      observation-enabled: true
     listener:
       ack-mode: RECORD
       concurrency: 1
+      observation-enabled: true
     producer:
       properties:
         max.block.ms: 2000
@@ -26,6 +29,15 @@ spring:
   flyway:
     table: flyway_provisioning_history
     baseline-on-migrate: true
+
+management:
+  tracing:
+    enabled: ${MANAGEMENT_TRACING_ENABLED:false}
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
 
 camunda:
   bpm:

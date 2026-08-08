@@ -59,6 +59,8 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9093}
       CAMUNDA_ADMIN_USER: ${CAMUNDA_ADMIN_USER:-demo}
       CAMUNDA_ADMIN_PASSWORD: ${CAMUNDA_ADMIN_PASSWORD:-demo}
+      MANAGEMENT_TRACING_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318/v1/traces}
     ports:
       - "8080:8080"
     healthcheck:
@@ -66,6 +68,17 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - provisioning-net
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "4318:4318"
     networks:
       - provisioning-net
 
