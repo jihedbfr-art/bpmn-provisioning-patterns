@@ -14,7 +14,7 @@ public class ProcessedEventRepository {
     private final String insertQuery;
 
     public ProcessedEventRepository(JdbcTemplate jdbc,
-                                    @org.springframework.beans.factory.annotation.Value("${provisioning.queries.insert-processed-event:INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING}") String insertQuery) {
+                                    @org.springframework.beans.factory.annotation.Value("${provisioning.queries.insert-processed-event:INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?)}") String insertQuery) {
         this.jdbc = jdbc;
         this.insertQuery = insertQuery;
     }
@@ -25,8 +25,13 @@ public class ProcessedEventRepository {
      * This relies entirely on the database UNIQUE constraint for idempotency, avoiding race conditions.
      */
     public boolean markProcessed(String eventId, String topic, String aggregateId) {
-        // executeUpdate returns 1 if inserted, 0 if it already existed (ON CONFLICT DO NOTHING)
-        int rows = jdbc.update(insertQuery, eventId, topic, aggregateId, Timestamp.from(Instant.now()));
-        return rows > 0;
+        try {
+            // executeUpdate returns 1 if inserted, 0 if it already existed (when using ON CONFLICT DO NOTHING)
+            int rows = jdbc.update(insertQuery, eventId, topic, aggregateId, Timestamp.from(Instant.now()));
+            return rows > 0;
+        } catch (DuplicateKeyException e) {
+            // Fallback for H2 standard INSERT query
+            return false;
+        }
     }
 }

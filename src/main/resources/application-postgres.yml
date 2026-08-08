@@ -11,3 +11,7 @@ camunda:
   bpm:
     database:
       schema-update: true
+
+provisioning:
+  queries:
+    insert-processed-event: "INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING"

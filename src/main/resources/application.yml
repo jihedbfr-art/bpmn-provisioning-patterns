@@ -48,7 +48,7 @@ provisioning:
       send-timeout: PT6S
       max-attempts: 10
   queries:
-    insert-processed-event: "INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING"
+    insert-processed-event: "INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?)"
   sla:
     donor-response-timeout: PT30M
   reconciliation:

@@ -115,7 +115,7 @@ exposed as an endpoint here mainly so it's testable and triggerable on demand.
 Publishing an event to Kafka from within a Camunda transaction is a classic **dual-write problem**: if the Kafka publish succeeds but the database commit fails, a ghost event is emitted. If the DB commits but Kafka fails, the event is permanently lost.
 To fix this, we implemented the **Transactional Outbox** pattern:
 - Instead of calling `KafkaTemplate` directly, `OutboxPortabilityEventPublisher` inserts an event into a `portability_outbox` table using the **same database transaction** as the Camunda process state. Both succeed or fail atomically.
-- A background relay (`OutboxRelay`) polls the outbox at regular intervals (`provisioning.outbox.relay.interval`, default `PT1S`) using `SELECT ... FOR UPDATE SKIP LOCKED` to lock a batch without blocking other relay instances.
+- A background relay (`OutboxRelay`) polls the outbox at regular intervals (`provisioning.outbox.relay.interval`, default `PT1S`) using `SELECT ... FOR UPDATE SKIP LOCKED` to lock a batch without blocking other relay instances. Note that the relay is currently single-instance and the `SKIP LOCKED` behavior is not covered by a concurrency test.
 - The relay synchronously publishes to Kafka (`provisioning.outbox.relay.send-timeout`) and marks the row as published.
 
 On the receiving side, consuming events requires **Idempotency**. Kafka provides at-least-once delivery, meaning a donor response could be processed twice during a network partition or consumer restart.

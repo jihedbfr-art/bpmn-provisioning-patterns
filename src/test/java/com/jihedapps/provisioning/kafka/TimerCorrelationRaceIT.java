@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 @SpringBootTest(classes = ProvisioningApplication.class, properties = {
@@ -80,23 +81,23 @@ class TimerCorrelationRaceIT {
                 "donorResponseTimeout", "PT1S"
         ));
 
-        // Wait for timer to trigger
-        Thread.sleep(1500);
+        // Wait for timer to trigger (Camunda job executor polls every few seconds)
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            HistoricProcessInstance historicProcessInstance = historyService.createHistoricProcessInstanceQuery()
+                    .processInstanceBusinessKey(requestId)
+                    .singleResult();
+                    
+            assertThat(historicProcessInstance).isNotNull();
 
-        HistoricProcessInstance historicProcessInstance = historyService.createHistoricProcessInstanceQuery()
-                .processInstanceBusinessKey(requestId)
-                .singleResult();
-                
-        assertThat(historicProcessInstance).isNotNull();
-
-        // Verify timeout path was taken
-        long historicActivityCount = historyService.createHistoricActivityInstanceQuery()
-                .processInstanceId(historicProcessInstance.getId())
-                .activityId("slaTimeout")
-                .finished()
-                .count();
-        
-        assertThat(historicActivityCount).isGreaterThan(0);
+            // Verify timeout path was taken
+            long historicActivityCount = historyService.createHistoricActivityInstanceQuery()
+                    .processInstanceId(historicProcessInstance.getId())
+                    .activityId("slaTimeout")
+                    .finished()
+                    .count();
+            
+            assertThat(historicActivityCount).isGreaterThan(0);
+        });
 
         // Simulate incoming message after timeout
         String eventId = UUID.randomUUID().toString();
