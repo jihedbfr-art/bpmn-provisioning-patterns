@@ -26,7 +26,7 @@ class SqlDialectPortabilityTest {
     }
 
     @Test
-    void onConflictInsertIsValidAndIdempotentOnH2() {
+    void processedEventInsertIsIdempotentOnDefaultProfile() {
         String id = UUID.randomUUID().toString();
         assertThat(processedEventRepository.markProcessed(id, "topic", "aggregate")).isTrue();
         assertThat(processedEventRepository.markProcessed(id, "topic", "aggregate")).isFalse();
