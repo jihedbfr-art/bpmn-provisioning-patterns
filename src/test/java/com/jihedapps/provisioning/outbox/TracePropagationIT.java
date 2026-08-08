@@ -7,7 +7,6 @@ import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.data.SpanData;
-import io.opentelemetry.sdk.trace.export.SpanExporter;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -18,6 +17,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpTracingAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +26,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.kafka.KafkaContainer;
 
@@ -41,10 +44,10 @@ import static org.awaitility.Awaitility.await;
         classes = {ProvisioningApplication.class, TracePropagationIT.TestTracingConfig.class},
         properties = {
                 "management.tracing.enabled=true",
-                "management.otlp.tracing.export.enabled=false",
                 "provisioning.outbox.relay.enabled=false"
         }
 )
+@ImportAutoConfiguration(exclude = OtlpTracingAutoConfiguration.class)
 @ActiveProfiles("postgres")
 class TracePropagationIT {
 
@@ -92,6 +95,9 @@ class TracePropagationIT {
     JdbcTemplate jdbc;
 
     @Autowired
+    TransactionTemplate txTemplate;
+
+    @Autowired
     Tracer tracer;
 
     @Autowired
@@ -113,7 +119,9 @@ class TracePropagationIT {
         String traceId;
         try (Tracer.SpanInScope scope = tracer.withSpan(parentSpan)) {
             traceId = parentSpan.context().traceId();
-            publisher.publish("PORTABILITY_REQUESTED", requestId, Map.of("msisdn", "+21620000000"));
+            txTemplate.executeWithoutResult(status ->
+                    publisher.publish("PORTABILITY_REQUESTED", requestId, Map.of("msisdn", "+21620000000"))
+            );
         } finally {
             parentSpan.end();
         }
@@ -160,7 +168,9 @@ class TracePropagationIT {
         String parentSpanId = parentSpan.context().spanId();
 
         try (Tracer.SpanInScope scope = tracer.withSpan(parentSpan)) {
-            publisher.publish("PORTABILITY_REQUESTED", requestId, Map.of("msisdn", "+21620000001"));
+            txTemplate.executeWithoutResult(status ->
+                    publisher.publish("PORTABILITY_REQUESTED", requestId, Map.of("msisdn", "+21620000001"))
+            );
         } finally {
             parentSpan.end();
         }
@@ -186,7 +196,9 @@ class TracePropagationIT {
         String traceId = parentSpan.context().traceId();
 
         try (Tracer.SpanInScope scope = tracer.withSpan(parentSpan)) {
-            publisher.publish("PORTABILITY_REQUESTED", requestId, Map.of("msisdn", "+21620000002"));
+            txTemplate.executeWithoutResult(status ->
+                    publisher.publish("PORTABILITY_REQUESTED", requestId, Map.of("msisdn", "+21620000002"))
+            );
         } finally {
             parentSpan.end();
         }
@@ -196,18 +208,19 @@ class TracePropagationIT {
                 "SELECT attempts FROM portability_outbox WHERE aggregate_id = ?", Integer.class, requestId);
         assertThat(attemptsBefore).isEqualTo(0);
 
-        // Stop Kafka to simulate outage
-        kafka.stop();
-
-        // Attempt publish -> should fail and increment attempts
-        outboxRelay.publishBatch();
+        // Pause Kafka to simulate outage without changing container port
+        try {
+            DockerClientFactory.lazyClient().pauseContainerCmd(kafka.getContainerId()).exec();
+            
+            // Attempt publish -> should fail and increment attempts
+            outboxRelay.publishBatch();
+        } finally {
+            DockerClientFactory.lazyClient().unpauseContainerCmd(kafka.getContainerId()).exec();
+        }
 
         Integer attemptsAfterFail = jdbc.queryForObject(
                 "SELECT attempts FROM portability_outbox WHERE aggregate_id = ?", Integer.class, requestId);
         assertThat(attemptsAfterFail).isEqualTo(1);
-
-        // Restart Kafka
-        kafka.start();
 
         // Attempt publish -> should succeed now
         outboxRelay.publishBatch();
