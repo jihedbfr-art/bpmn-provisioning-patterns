@@ -76,7 +76,7 @@ public class PortabilityController {
             return ResponseEntity.badRequest().body(Map.of("error", "decision must be ACCEPTED or REJECTED"));
         }
         
-        String eventId = UUID.randomUUID().toString();
+        String eventId = body.getOrDefault("eventId", UUID.randomUUID().toString());
         DonorResponseEvent event = new DonorResponseEvent(eventId, requestId, decision.name(), Instant.now());
         
         try {
