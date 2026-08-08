@@ -70,9 +70,8 @@ public class OutboxRelay {
 
     /**
      * Polling publisher reading the outbox table.
-     * Note: Ordering by aggregate_id is roughly preserved by SKIP LOCKED, but multi-instance relays
-     * could interleave messages. The broker partition key will maintain order for what it receives,
-     * but we do not guarantee strict global event ordering here, only at-least-once delivery.
+     * Note: SKIP LOCKED skips locked rows to allow parallel processing across multiple relay instances,
+     * which does not guarantee strict global event ordering across partitions, only at-least-once delivery.
      */
     @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}")
     @Transactional(timeout = 30)
@@ -96,8 +95,9 @@ public class OutboxRelay {
                     try {
                         java.util.Map<String, String> carrier = mapper.readValue(record.traceContext(), new TypeReference<>() {});
                         Span.Builder builder = propagator.extract(carrier, java.util.Map::get);
-                        span = builder.start();
-                        span.tag("outbox.attempts", String.valueOf(record.attempts()));
+                        span = builder.name("outbox-publish").start();
+                        span.tag("messaging.destination", topic);
+                        span.tag("outbox.attempts", String.valueOf(record.attempts() + 1));
                         scope = tracer.withSpan(span);
                     } catch (Exception e) {
                         LOG.warn("Failed to extract trace context for record {}", record.id(), e);
