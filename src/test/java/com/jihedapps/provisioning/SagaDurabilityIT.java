@@ -103,15 +103,14 @@ class SagaDurabilityIT {
     private ConfigurableApplicationContext startContext() {
         return new SpringApplicationBuilder(ProvisioningApplication.class)
                 .profiles("postgres")
-                .properties(
-                        "camunda.bpm.job-execution.enabled=false",
-                        "spring.jmx.enabled=false", // Prevent JMX conflicts when running multiple ITs
-                        "server.port=0", // Use random port to avoid conflicts across restarts
-                        "spring.datasource.url=" + postgres.getJdbcUrl(),
-                        "spring.datasource.username=" + postgres.getUsername(),
-                        "spring.datasource.password=" + postgres.getPassword(),
-                        "spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers()
-                )
-                .run();
+                .run(
+                        "--camunda.bpm.job-execution.enabled=false",
+                        "--spring.jmx.enabled=false", // Prevent JMX conflicts when running multiple ITs
+                        "--server.port=0", // Use random port to avoid conflicts across restarts
+                        "--spring.datasource.url=" + postgres.getJdbcUrl(),
+                        "--spring.datasource.username=" + postgres.getUsername(),
+                        "--spring.datasource.password=" + postgres.getPassword(),
+                        "--spring.kafka.bootstrap-servers=" + kafka.getBootstrapServers()
+                );
     }
 }
