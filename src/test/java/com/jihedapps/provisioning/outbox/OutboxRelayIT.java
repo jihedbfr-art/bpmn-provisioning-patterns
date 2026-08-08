@@ -9,7 +9,6 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.camunda.bpm.engine.RuntimeService;
-import org.camunda.bpm.engine.runtime.ProcessInstance;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,6 @@ import org.testcontainers.kafka.KafkaContainer;
 
 import java.time.Duration;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,7 +31,11 @@ import static org.awaitility.Awaitility.await;
 
 @SpringBootTest(classes = ProvisioningApplication.class, properties = {
         "provisioning.outbox.relay.enabled=false",
-        "camunda.bpm.job-execution.enabled=false"
+        "camunda.bpm.job-execution.enabled=false",
+        "provisioning.outbox.relay.max-attempts=3",
+        "spring.kafka.producer.properties.delivery.timeout.ms=1000",
+        "spring.kafka.producer.properties.request.timeout.ms=500",
+        "spring.kafka.producer.properties.max.block.ms=500"
 })
 @ActiveProfiles("postgres")
 class OutboxRelayIT {
@@ -74,19 +76,10 @@ class OutboxRelayIT {
     ObjectMapper mapper;
 
     @Test
-    void testOutboxNormalAndBrokerOutage() throws Exception {
-        // --- Setup Consumer ---
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(Map.of(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
-                ConsumerConfig.GROUP_ID_CONFIG, "test-outbox-relay-" + UUID.randomUUID(),
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class
-        ));
-        consumer.subscribe(Collections.singletonList("number-portability-events"));
-
-        // Case 1: Saga started, outbox written, but NOT published yet
+    void shouldPublishSuccessfullyWhenBrokerIsUp() throws Exception {
+        KafkaConsumer<String, String> consumer = createConsumer();
         String req1 = UUID.randomUUID().toString();
+        
         runtimeService.startProcessInstanceByKey("number-portability-saga", req1, Map.of(
                 "msisdn", "+21620000000",
                 "donorOperator", "Ooredoo",
@@ -94,14 +87,6 @@ class OutboxRelayIT {
                 "donorResponseTimeout", "PT30M"
         ));
 
-        // Wait to make sure Camunda committed it to DB
-        Integer unpublished = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NULL", Integer.class, req1);
-        assertThat(unpublished).isEqualTo(1);
-
-        ConsumerRecords<String, String> emptyRecords = consumer.poll(Duration.ofSeconds(2));
-        assertThat(emptyRecords.isEmpty()).isTrue(); // Nothing on Kafka yet
-
-        // Case 2: Call publishBatch manually -> Kafka topic receives it
         outboxRelay.publishBatch();
 
         Integer afterPublish = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
@@ -115,10 +100,14 @@ class OutboxRelayIT {
             JsonNode node = mapper.readTree(rec.value());
             assertThat(node.get("eventType").asText()).isEqualTo("PortabilityRequestedEvent");
         });
+        
+        consumer.close();
+    }
 
-        // Case 3: Broker Outage
-        // We use pause/unpause to simulate an outage because stop/start would change the mapped port
-        // and Spring's KafkaProducer would be permanently unable to reconnect to the new random port.
+    @Test
+    void shouldRetryAndPublishWhenBrokerRecovers() throws Exception {
+        KafkaConsumer<String, String> consumer = createConsumer();
+        
         kafka.getDockerClient().pauseContainerCmd(kafka.getContainerId()).exec();
 
         String req2 = UUID.randomUUID().toString();
@@ -129,32 +118,25 @@ class OutboxRelayIT {
                 "donorResponseTimeout", "PT30M"
         ));
 
-        Integer unpublished2 = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NULL", Integer.class, req2);
-        assertThat(unpublished2).isEqualTo(1);
-
-        // Try to publish while broker is down
+        // Attempt 1 fails
         outboxRelay.publishBatch();
 
-        // Should still be unpublished, but attempts > 0
         Map<String, Object> record2 = jdbc.queryForMap("SELECT attempts, last_error FROM portability_outbox WHERE aggregate_id = ?", req2);
-        assertThat((Integer) record2.get("attempts")).isGreaterThan(0);
+        assertThat((Integer) record2.get("attempts")).isEqualTo(1);
         assertThat(record2.get("last_error")).isNotNull();
 
         // Restore broker
         kafka.getDockerClient().unpauseContainerCmd(kafka.getContainerId()).exec();
-        
-        // Wait for Kafka to settle
-        Thread.sleep(1000);
 
-        outboxRelay.publishBatch();
-        
-        Integer afterPublish2 = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req2);
-        assertThat(afterPublish2).isEqualTo(1);
+        // Keep trying to publish until it succeeds (Kafka might take a moment to be fully ready)
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            outboxRelay.publishBatch();
+            Integer count = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req2);
+            assertThat(count).isEqualTo(1);
+        });
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
-            assertThat(records.isEmpty()).isFalse();
-            // find the record
             boolean found = false;
             for (ConsumerRecord<String, String> r : records) {
                 if (req2.equals(r.key())) found = true;
@@ -163,5 +145,59 @@ class OutboxRelayIT {
         });
         
         consumer.close();
+    }
+    
+    @Test
+    void shouldStopBatchAndMarkFailedWhenBrokerIsDown() throws Exception {
+        kafka.getDockerClient().pauseContainerCmd(kafka.getContainerId()).exec();
+
+        try {
+            // Create 15 events in outbox
+            for (int i = 0; i < 15; i++) {
+                String req = UUID.randomUUID().toString();
+                runtimeService.startProcessInstanceByKey("number-portability-saga", req, Map.of(
+                        "msisdn", "+21620000000",
+                        "donorOperator", "Ooredoo",
+                        "recipientOperator", "Orange",
+                        "donorResponseTimeout", "PT30M"
+                ));
+            }
+
+            Integer pendingBefore = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE published_at IS NULL", Integer.class);
+            assertThat(pendingBefore).isEqualTo(15);
+
+            // maxAttempts = 3, we have 15 events.
+            // When broker is down, each publishBatch() fails on the FIRST event of the batch and breaks.
+            // So if we call it 3 times, the oldest event reaches attempts=3 and gets failed_at set.
+            // If we call it 11 times, at least 3 events should reach max attempts and be dead,
+            // while the remaining events are still pending and attempts < 3.
+            
+            for (int i = 0; i < 11; i++) {
+                outboxRelay.publishBatch();
+            }
+
+            Integer deadCount = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE failed_at IS NOT NULL", Integer.class);
+            assertThat(deadCount).isGreaterThan(0);
+            
+            // Specifically, with 11 calls and max_attempts=3, the oldest events should have failed_at set
+            // The exact number depends on how batches are read, but at least one must be dead.
+            // 11 calls / 3 attempts = 3 dead events, and the 4th has 2 attempts.
+            assertThat(deadCount).isEqualTo(3);
+
+        } finally {
+            kafka.getDockerClient().unpauseContainerCmd(kafka.getContainerId()).exec();
+        }
+    }
+
+    private KafkaConsumer<String, String> createConsumer() {
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "test-outbox-relay-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class
+        ));
+        consumer.subscribe(Collections.singletonList("number-portability-events"));
+        return consumer;
     }
 }

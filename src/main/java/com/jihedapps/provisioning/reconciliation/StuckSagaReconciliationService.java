@@ -45,6 +45,7 @@ public class StuckSagaReconciliationService {
         this.stuckThreshold = Duration.parse(stuckThreshold);
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public List<StuckSagaReport> reconcileStuckSagas() {
         List<StuckSagaReport> stuck = new ArrayList<>();
         long now = ClockUtil.getCurrentTime().getTime();

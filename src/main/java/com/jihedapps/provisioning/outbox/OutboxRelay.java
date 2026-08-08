@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +17,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
-@EnableScheduling
 @ConditionalOnProperty(name = "provisioning.outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxRelay {
 
@@ -26,9 +24,12 @@ public class OutboxRelay {
 
     private final OutboxRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final JdbcTemplate jdbcTemplate;
     private final String topic;
     private final int batchSize;
     private final Duration sendTimeout;
+    private final java.util.concurrent.atomic.AtomicInteger pendingGauge;
+    private final java.util.concurrent.atomic.AtomicInteger deadGauge;
 
     public OutboxRelay(OutboxRepository repository,
                        KafkaTemplate<String, String> kafkaTemplate,
@@ -39,14 +40,13 @@ public class OutboxRelay {
                        @Value("${provisioning.outbox.relay.send-timeout:PT5S}") Duration sendTimeout) {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
+        this.jdbcTemplate = jdbcTemplate;
         this.topic = topic;
         this.batchSize = batchSize;
         this.sendTimeout = sendTimeout;
 
-        Gauge.builder("provisioning.outbox.pending", () -> 
-                jdbcTemplate.queryForObject("SELECT count(*) FROM portability_outbox WHERE published_at IS NULL", Integer.class))
-             .description("Number of pending outbox events")
-             .register(meterRegistry);
+        this.pendingGauge = meterRegistry.gauge("provisioning.outbox.pending", new java.util.concurrent.atomic.AtomicInteger(0));
+        this.deadGauge = meterRegistry.gauge("provisioning.outbox.dead", new java.util.concurrent.atomic.AtomicInteger(0));
     }
 
     /**
@@ -56,8 +56,10 @@ public class OutboxRelay {
      * but we do not guarantee strict global event ordering here, only at-least-once delivery.
      */
     @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}")
-    @Transactional
+    @Transactional(timeout = 30)
     public void publishBatch() {
+        updateMetrics();
+
         List<OutboxRecord> batch = repository.lockUnpublishedBatch(batchSize);
         if (batch.isEmpty()) {
             return;
@@ -74,7 +76,19 @@ public class OutboxRelay {
             } catch (Exception e) {
                 LOG.error("Failed to publish outbox record {}", record.id(), e);
                 repository.markFailed(record.id(), e.getMessage());
+                break; // Stop processing batch if broker is down to prevent transaction timeout
             }
+        }
+    }
+
+    private void updateMetrics() {
+        Integer pending = jdbcTemplate.queryForObject("SELECT count(*) FROM portability_outbox WHERE published_at IS NULL AND failed_at IS NULL", Integer.class);
+        if (pending != null) {
+            pendingGauge.set(pending);
+        }
+        Integer dead = jdbcTemplate.queryForObject("SELECT count(*) FROM portability_outbox WHERE failed_at IS NOT NULL", Integer.class);
+        if (dead != null) {
+            deadGauge.set(dead);
         }
     }
 }

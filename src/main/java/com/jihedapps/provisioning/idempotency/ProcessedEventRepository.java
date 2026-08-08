@@ -11,9 +11,12 @@ import java.time.Instant;
 public class ProcessedEventRepository {
 
     private final JdbcTemplate jdbc;
+    private final String insertQuery;
 
-    public ProcessedEventRepository(JdbcTemplate jdbc) {
+    public ProcessedEventRepository(JdbcTemplate jdbc,
+                                    @org.springframework.beans.factory.annotation.Value("${provisioning.queries.insert-processed-event:INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING}") String insertQuery) {
         this.jdbc = jdbc;
+        this.insertQuery = insertQuery;
     }
 
     /**
@@ -22,12 +25,8 @@ public class ProcessedEventRepository {
      * This relies entirely on the database UNIQUE constraint for idempotency, avoiding race conditions.
      */
     public boolean markProcessed(String eventId, String topic, String aggregateId) {
-        try {
-            jdbc.update("INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?)",
-                    eventId, topic, aggregateId, Timestamp.from(Instant.now()));
-            return true;
-        } catch (DuplicateKeyException e) {
-            return false;
-        }
+        // executeUpdate returns 1 if inserted, 0 if it already existed (ON CONFLICT DO NOTHING)
+        int rows = jdbc.update(insertQuery, eventId, topic, aggregateId, Timestamp.from(Instant.now()));
+        return rows > 0;
     }
 }

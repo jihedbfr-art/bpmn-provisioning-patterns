@@ -15,10 +15,14 @@ public class OutboxRepository {
     private final JdbcTemplate jdbc;
     private final String selectQuery;
 
+    private final int maxAttempts;
+
     public OutboxRepository(JdbcTemplate jdbc,
-                            @Value("${provisioning.outbox.select-query:SELECT * FROM portability_outbox WHERE published_at IS NULL ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT ?}") String selectQuery) {
+                            @Value("${provisioning.outbox.select-query:SELECT * FROM portability_outbox WHERE published_at IS NULL AND attempts < ? ORDER BY created_at LIMIT ? FOR UPDATE SKIP LOCKED}") String selectQuery,
+                            @Value("${provisioning.outbox.relay.max-attempts:10}") int maxAttempts) {
         this.jdbc = jdbc;
         this.selectQuery = selectQuery;
+        this.maxAttempts = maxAttempts;
     }
 
     public void insert(OutboxRecord record) {
@@ -34,7 +38,7 @@ public class OutboxRepository {
     }
 
     public List<OutboxRecord> lockUnpublishedBatch(int limit) {
-        return jdbc.query(selectQuery, outboxRowMapper, limit);
+        return jdbc.query(selectQuery, outboxRowMapper, maxAttempts, limit);
     }
 
     public void markPublished(String id) {
@@ -42,7 +46,8 @@ public class OutboxRepository {
     }
 
     public void markFailed(String id, String error) {
-        jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?", error, id);
+        jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ?, failed_at = CASE WHEN attempts + 1 >= ? THEN ? ELSE NULL END WHERE id = ?", 
+                error, maxAttempts, Timestamp.from(Instant.now()), id);
     }
 
     private final RowMapper<OutboxRecord> outboxRowMapper = (rs, rowNum) -> new OutboxRecord(

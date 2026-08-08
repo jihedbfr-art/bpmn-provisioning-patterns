@@ -12,9 +12,17 @@ spring:
       enable-auto-commit: false
       auto-offset-reset: earliest
       isolation-level: read_committed
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.apache.kafka.common.serialization.StringDeserializer
     listener:
       ack-mode: RECORD
       concurrency: 1
+    producer:
+      properties:
+        max.block.ms: 2000
+        request.timeout.ms: 2000
+        delivery.timeout.ms: 4000
   flyway:
     table: flyway_provisioning_history
     baseline-on-migrate: true
@@ -36,8 +44,11 @@ provisioning:
     relay:
       enabled: true
       interval: PT1S
-      batch-size: 50
-      send-timeout: PT5S
+      batch-size: 10
+      send-timeout: PT6S
+      max-attempts: 10
+  queries:
+    insert-processed-event: "INSERT INTO processed_events (event_id, topic, aggregate_id, processed_at) VALUES (?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING"
   sla:
     donor-response-timeout: PT30M
   reconciliation:

@@ -199,6 +199,10 @@ than randomly.
 
 - Port to Camunda 8 / Zeebe as a second, parallel implementation of the same patterns
 - Wire the reconciliation sweep to an actual schedule instead of only a manual endpoint
+- Purge strategies for `portability_outbox` and `processed_events` to prevent unbounded growth and index degradation
+- Retry and replay mechanisms for Dead Letter Topic (DLT) messages
+- Monitoring and alerts on `provisioning.outbox.dead` metric
+- Multi-instance concurrency testing for the outbox relay (validating `SKIP LOCKED` across multiple nodes)
 
 ## License
 

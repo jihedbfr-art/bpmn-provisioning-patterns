@@ -81,9 +81,10 @@ public class PortabilityController {
         
         try {
             String json = objectMapper.writeValueAsString(event);
-            kafkaTemplate.send(donorResponseTopic, requestId, json);
+            kafkaTemplate.send(donorResponseTopic, requestId, json).get(5, java.util.concurrent.TimeUnit.SECONDS);
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(Map.of("error", "Failed to publish donor response"));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Map.of("error", "Broker is currently unavailable, please try again later"));
         }
 
         return ResponseEntity.accepted().body(Map.of(
