@@ -6,8 +6,9 @@ import com.jihedapps.provisioning.kafka.OutboxPortabilityEventPublisher;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
+import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.data.SpanData;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -44,10 +45,10 @@ import static org.awaitility.Awaitility.await;
         classes = {ProvisioningApplication.class, TracePropagationIT.TestTracingConfig.class},
         properties = {
                 "management.tracing.enabled=true",
-                "provisioning.outbox.relay.enabled=false"
+                "provisioning.outbox.relay.enabled=false",
+                "spring.autoconfigure.exclude=org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration"
         }
 )
-@ImportAutoConfiguration(exclude = OtlpAutoConfiguration.class)
 @ActiveProfiles("postgres")
 class TracePropagationIT {
 
@@ -79,6 +80,11 @@ class TracePropagationIT {
         @Bean
         InMemorySpanExporter inMemorySpanExporter() {
             return InMemorySpanExporter.create();
+        }
+
+        @Bean
+        SpanProcessor simpleSpanProcessor(InMemorySpanExporter exporter) {
+            return SimpleSpanProcessor.create(exporter);
         }
     }
 
