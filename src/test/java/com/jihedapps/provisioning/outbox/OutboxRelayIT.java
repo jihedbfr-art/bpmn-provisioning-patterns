@@ -79,6 +79,11 @@ class OutboxRelayIT {
     @BeforeEach
     void clearOutbox() {
         jdbc.execute("TRUNCATE TABLE portability_outbox");
+        await().atMost(Duration.ofSeconds(15)).ignoreExceptions().untilAsserted(() -> {
+            try (KafkaConsumer<String, String> c = createConsumer()) {
+                assertThat(c.partitionsFor("number-portability-events")).isNotEmpty();
+            }
+        });
     }
 
     @Test
