@@ -114,6 +114,7 @@ class TracePropagationIT {
     @BeforeEach
     void setup() {
         inMemorySpanExporter.reset();
+        jdbc.execute("TRUNCATE TABLE portability_outbox");
     }
 
     @Test

@@ -11,6 +11,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.camunda.bpm.engine.RuntimeService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -75,6 +76,11 @@ class OutboxRelayIT {
     @Autowired
     ObjectMapper mapper;
 
+    @BeforeEach
+    void clearOutbox() {
+        jdbc.execute("TRUNCATE TABLE portability_outbox");
+    }
+
     @Test
     void shouldPublishSuccessfullyWhenBrokerIsUp() throws Exception {
         KafkaConsumer<String, String> consumer = createConsumer();
@@ -118,15 +124,17 @@ class OutboxRelayIT {
                 "donorResponseTimeout", "PT30M"
         ));
 
-        // Attempt 1 fails
-        outboxRelay.publishBatch();
+        try {
+            // Attempt 1 fails
+            outboxRelay.publishBatch();
 
-        Map<String, Object> record2 = jdbc.queryForMap("SELECT attempts, last_error FROM portability_outbox WHERE aggregate_id = ?", req2);
-        assertThat((Integer) record2.get("attempts")).isEqualTo(1);
-        assertThat(record2.get("last_error")).isNotNull();
-
-        // Restore broker
-        kafka.getDockerClient().unpauseContainerCmd(kafka.getContainerId()).exec();
+            Map<String, Object> record2 = jdbc.queryForMap("SELECT attempts, last_error FROM portability_outbox WHERE aggregate_id = ?", req2);
+            assertThat((Integer) record2.get("attempts")).isEqualTo(1);
+            assertThat(record2.get("last_error")).isNotNull();
+        } finally {
+            // Restore broker
+            kafka.getDockerClient().unpauseContainerCmd(kafka.getContainerId()).exec();
+        }
 
         // Keep trying to publish until it succeeds (Kafka might take a moment to be fully ready)
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
