@@ -33,7 +33,7 @@ public class DonorResponseListener {
     }
 
     @KafkaListener(id = "donor-response-listener", topics = "${provisioning.kafka.donor-response-topic}", groupId = "bpmn-provisioning-patterns")
-    @Transactional
+    @Transactional(noRollbackFor = MismatchingMessageCorrelationException.class)
     public void onDonorResponse(String payload) throws Exception {
         DonorResponseEvent event = objectMapper.readValue(payload, DonorResponseEvent.class);
         

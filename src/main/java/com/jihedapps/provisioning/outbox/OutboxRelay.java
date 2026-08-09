@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
-@ConditionalOnProperty(name = "provisioning.outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxRelay {
 
     private static final Logger LOG = LoggerFactory.getLogger(OutboxRelay.class);
@@ -37,6 +36,7 @@ public class OutboxRelay {
     private final String topic;
     private final int batchSize;
     private final int metricsInterval;
+    private final boolean enabled;
     
     private int cycleCount = 0;
     private final Duration sendTimeout;
@@ -53,7 +53,8 @@ public class OutboxRelay {
                        @Value("${provisioning.kafka.topic:number-portability-events}") String topic,
                        @Value("${provisioning.outbox.relay.send-timeout:PT6S}") Duration sendTimeout,
                        @Value("${provisioning.outbox.relay.batch-size:10}") int batchSize,
-                       @Value("${provisioning.outbox.relay.metrics-interval:30}") int metricsInterval) {
+                       @Value("${provisioning.outbox.relay.metrics-interval:30}") int metricsInterval,
+                       @Value("${provisioning.outbox.relay.enabled:true}") boolean enabled) {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.jdbcTemplate = jdbcTemplate;
@@ -64,6 +65,7 @@ public class OutboxRelay {
         this.sendTimeout = sendTimeout;
         this.batchSize = batchSize;
         this.metricsInterval = metricsInterval;
+        this.enabled = enabled;
 
         this.pendingGauge = meterRegistry.gauge("provisioning.outbox.pending", new java.util.concurrent.atomic.AtomicInteger(0));
         this.deadGauge = meterRegistry.gauge("provisioning.outbox.dead", new java.util.concurrent.atomic.AtomicInteger(0));
@@ -77,6 +79,10 @@ public class OutboxRelay {
     @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}")
     @Transactional(timeout = 30)
     public void publishBatch() {
+        if (!enabled) {
+            return;
+        }
+
         if (cycleCount++ % metricsInterval == 0) {
             updateMetrics();
         }

@@ -46,7 +46,7 @@ class PortabilityEventPublisherIT {
     }
 
     @Autowired
-    private KafkaPortabilityEventPublisher publisher;
+    private PortabilityEventPublisher publisher;
 
     private KafkaConsumer<String, String> consumer;
 
