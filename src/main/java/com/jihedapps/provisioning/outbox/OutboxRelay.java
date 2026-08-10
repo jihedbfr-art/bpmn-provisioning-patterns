@@ -30,8 +30,8 @@ public class OutboxRelay {
     private final OutboxRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final JdbcTemplate jdbcTemplate;
-    private final Tracer tracer;
-    private final Propagator propagator;
+    private final ObjectProvider<Tracer> tracerProvider;
+    private final ObjectProvider<Propagator> propagatorProvider;
     private final ObjectMapper mapper;
     private final String topic;
     private final int batchSize;
@@ -58,8 +58,8 @@ public class OutboxRelay {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.jdbcTemplate = jdbcTemplate;
-        this.tracer = tracerProvider.getIfAvailable(() -> Tracer.NOOP);
-        this.propagator = propagatorProvider.getIfAvailable(() -> Propagator.NOOP);
+        this.tracerProvider = tracerProvider;
+        this.propagatorProvider = propagatorProvider;
         this.mapper = mapper;
         this.topic = topic;
         this.sendTimeout = sendTimeout;
@@ -77,11 +77,15 @@ public class OutboxRelay {
      * which does not guarantee strict global event ordering across partitions, only at-least-once delivery.
      */
     @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}")
-    @Transactional(timeout = 30)
-    public void publishBatch() {
+    public void scheduledPublishBatch() {
         if (!enabled) {
             return;
         }
+        publishBatch();
+    }
+
+    @Transactional(timeout = 30)
+    public void publishBatch() {
 
         if (cycleCount++ % metricsInterval == 0) {
             updateMetrics();
@@ -93,6 +97,9 @@ public class OutboxRelay {
         }
 
         LOG.debug("Publishing {} outbox records", batch.size());
+
+        Tracer tracer = tracerProvider.getIfAvailable(() -> Tracer.NOOP);
+        Propagator propagator = propagatorProvider.getIfAvailable(() -> Propagator.NOOP);
 
         for (OutboxRecord record : batch) {
             Span span = null;

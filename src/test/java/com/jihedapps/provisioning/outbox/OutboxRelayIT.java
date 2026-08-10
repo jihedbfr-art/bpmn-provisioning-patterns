@@ -130,8 +130,10 @@ class OutboxRelayIT {
         ));
 
         try {
+            System.out.println("DEBUG: records before publishBatch: " + jdbc.queryForList("SELECT * FROM portability_outbox"));
             // Attempt 1 fails
             outboxRelay.publishBatch();
+            System.out.println("DEBUG: records after publishBatch: " + jdbc.queryForList("SELECT * FROM portability_outbox"));
 
             Map<String, Object> record2 = jdbc.queryForMap("SELECT attempts, last_error FROM portability_outbox WHERE aggregate_id = ?", req2);
             assertThat((Integer) record2.get("attempts")).isEqualTo(1);
