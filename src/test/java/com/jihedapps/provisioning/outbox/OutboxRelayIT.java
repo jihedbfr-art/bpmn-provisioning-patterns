@@ -96,15 +96,6 @@ class OutboxRelayIT {
     @Test
     @Order(1)
     void shouldPublishSuccessfullyWhenBrokerIsUp() throws Exception {
-        KafkaConsumer<String, String> consumer = createConsumer();
-        // Block until partition assignment is complete so we don't miss messages
-        // published before the first real poll.
-        await().atMost(Duration.ofSeconds(15)).until(() -> {
-            consumer.poll(Duration.ofMillis(200));
-            return !consumer.assignment().isEmpty();
-        });
-        consumer.seekToBeginning(consumer.assignment());
-
         String req1 = UUID.randomUUID().toString();
         
         runtimeService.startProcessInstanceByKey("number-portability-saga", req1, Map.of(
@@ -119,7 +110,9 @@ class OutboxRelayIT {
         Integer afterPublish = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
         assertThat(afterPublish).isEqualTo(1);
 
-        await().atMost(Duration.ofSeconds(25)).untilAsserted(() -> {
+        // Create consumer AFTER publishing — auto.offset.reset=earliest reads from offset 0
+        KafkaConsumer<String, String> consumer = createConsumer();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
             assertThat(records.isEmpty()).isFalse();
             ConsumerRecord<String, String> rec = records.iterator().next();
