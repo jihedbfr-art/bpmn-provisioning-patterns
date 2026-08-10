@@ -89,6 +89,14 @@ class OutboxRelayIT {
     @Test
     void shouldPublishSuccessfullyWhenBrokerIsUp() throws Exception {
         KafkaConsumer<String, String> consumer = createConsumer();
+        // Block until partition assignment is complete so we don't miss messages
+        // published before the first real poll.
+        await().atMost(Duration.ofSeconds(15)).until(() -> {
+            consumer.poll(Duration.ofMillis(200));
+            return !consumer.assignment().isEmpty();
+        });
+        consumer.seekToBeginning(consumer.assignment());
+
         String req1 = UUID.randomUUID().toString();
         
         runtimeService.startProcessInstanceByKey("number-portability-saga", req1, Map.of(

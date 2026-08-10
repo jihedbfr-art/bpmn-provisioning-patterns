@@ -84,7 +84,7 @@ public class OutboxRelay {
         publishBatch();
     }
 
-    @Transactional(timeout = 30)
+    @Transactional(timeout = 60)
     public void publishBatch() {
 
         if (cycleCount++ % metricsInterval == 0) {
