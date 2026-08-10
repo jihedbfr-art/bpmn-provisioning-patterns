@@ -30,8 +30,8 @@ public class OutboxRelay {
     private final OutboxRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final JdbcTemplate jdbcTemplate;
-    private final ObjectProvider<Tracer> tracerProvider;
-    private final ObjectProvider<Propagator> propagatorProvider;
+    private final Tracer tracer;
+    private final Propagator propagator;
     private final ObjectMapper mapper;
     private final String topic;
     private final int batchSize;
@@ -47,8 +47,8 @@ public class OutboxRelay {
                        KafkaTemplate<String, String> kafkaTemplate,
                        JdbcTemplate jdbcTemplate,
                        MeterRegistry meterRegistry,
-                       ObjectProvider<Tracer> tracerProvider,
-                       ObjectProvider<Propagator> propagatorProvider,
+                       @org.springframework.context.annotation.Lazy Tracer tracer,
+                       @org.springframework.context.annotation.Lazy Propagator propagator,
                        ObjectMapper mapper,
                        @Value("${provisioning.kafka.topic:number-portability-events}") String topic,
                        @Value("${provisioning.outbox.relay.send-timeout:PT6S}") Duration sendTimeout,
@@ -58,8 +58,8 @@ public class OutboxRelay {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.jdbcTemplate = jdbcTemplate;
-        this.tracerProvider = tracerProvider;
-        this.propagatorProvider = propagatorProvider;
+        this.tracer = tracer;
+        this.propagator = propagator;
         this.mapper = mapper;
         this.topic = topic;
         this.sendTimeout = sendTimeout;
@@ -97,9 +97,6 @@ public class OutboxRelay {
         }
 
         LOG.debug("Publishing {} outbox records", batch.size());
-
-        Tracer tracer = tracerProvider.getIfAvailable(() -> Tracer.NOOP);
-        Propagator propagator = propagatorProvider.getIfAvailable(() -> Propagator.NOOP);
 
         for (OutboxRecord record : batch) {
             Span span = null;

@@ -48,7 +48,7 @@ public class OutboxRepository {
 
     public void markFailed(String id, String error) {
         String truncatedError = error != null && error.length() > 2000 ? error.substring(0, 2000) : error;
-        jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ?, failed_at = CASE WHEN attempts + 1 >= ? THEN ? ELSE NULL END WHERE id = ?", 
+        jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ?, failed_at = CASE WHEN attempts + 1 >= ? THEN CAST(? AS TIMESTAMP) ELSE NULL END WHERE id = ?", 
                 truncatedError, maxAttempts, Timestamp.from(Instant.now()), id);
     }
 

@@ -44,8 +44,7 @@ import static org.awaitility.Awaitility.await;
         classes = {ProvisioningApplication.class, TracePropagationIT.TestTracingConfig.class},
         properties = {
                 "management.tracing.enabled=true",
-                "provisioning.outbox.relay.enabled=false",
-                "spring.autoconfigure.exclude=org.springframework.boot.actuate.autoconfigure.tracing.otlp.OtlpAutoConfiguration"
+                "provisioning.outbox.relay.enabled=false"
         }
 )
 @ActiveProfiles("postgres")

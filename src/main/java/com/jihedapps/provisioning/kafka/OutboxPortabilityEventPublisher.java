@@ -22,17 +22,17 @@ public class OutboxPortabilityEventPublisher implements PortabilityEventPublishe
 
     private final OutboxRepository outboxRepository;
     private final ObjectMapper mapper;
-    private final ObjectProvider<Tracer> tracerProvider;
-    private final ObjectProvider<Propagator> propagatorProvider;
+    private final Tracer tracer;
+    private final Propagator propagator;
 
     public OutboxPortabilityEventPublisher(OutboxRepository outboxRepository,
                                          ObjectMapper mapper,
-                                         ObjectProvider<Tracer> tracerProvider,
-                                         ObjectProvider<Propagator> propagatorProvider) {
+                                         @org.springframework.context.annotation.Lazy Tracer tracer,
+                                         @org.springframework.context.annotation.Lazy Propagator propagator) {
         this.outboxRepository = outboxRepository;
         this.mapper = mapper;
-        this.tracerProvider = tracerProvider;
-        this.propagatorProvider = propagatorProvider;
+        this.tracer = tracer;
+        this.propagator = propagator;
     }
 
     @Override
@@ -48,8 +48,6 @@ public class OutboxPortabilityEventPublisher implements PortabilityEventPublishe
         envelope.put("payload", payload);
 
         Map<String, String> carrier = new HashMap<>();
-        Tracer tracer = tracerProvider.getIfAvailable(() -> Tracer.NOOP);
-        Propagator propagator = propagatorProvider.getIfAvailable(() -> Propagator.NOOP);
         if (tracer.currentTraceContext().context() != null) {
             propagator.inject(tracer.currentTraceContext().context(), carrier, Map::put);
         }
