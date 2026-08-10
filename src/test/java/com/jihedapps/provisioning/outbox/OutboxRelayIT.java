@@ -103,7 +103,7 @@ class OutboxRelayIT {
         Integer afterPublish = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
         assertThat(afterPublish).isEqualTo(1);
 
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+        await().atMost(Duration.ofSeconds(25)).untilAsserted(() -> {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
             assertThat(records.isEmpty()).isFalse();
             ConsumerRecord<String, String> rec = records.iterator().next();

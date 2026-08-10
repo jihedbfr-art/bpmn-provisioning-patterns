@@ -5,8 +5,12 @@ import com.jihedapps.provisioning.ProvisioningApplication;
 import com.jihedapps.provisioning.kafka.OutboxPortabilityEventPublisher;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
+import io.opentelemetry.context.propagation.ContextPropagators;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
-import io.opentelemetry.sdk.trace.SpanProcessor;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -80,9 +84,22 @@ class TracePropagationIT {
             return InMemorySpanExporter.create();
         }
 
+        /**
+         * Provides an explicit OpenTelemetry SDK with W3C propagation.
+         * Without this, the auto-configured bean has no TextMapPropagator set,
+         * causing propagator.inject() to produce an empty carrier (CARRIER: {}).
+         * buildAndRegisterGlobal() ensures the Micrometer OTel bridge and the
+         * thread-local OTel Context use the same SDK instance.
+         */
         @Bean
-        SpanProcessor simpleSpanProcessor(InMemorySpanExporter exporter) {
-            return SimpleSpanProcessor.create(exporter);
+        @org.springframework.context.annotation.Primary
+        OpenTelemetry openTelemetry(InMemorySpanExporter exporter) {
+            return OpenTelemetrySdk.builder()
+                    .setTracerProvider(SdkTracerProvider.builder()
+                            .addSpanProcessor(SimpleSpanProcessor.create(exporter))
+                            .build())
+                    .setPropagators(ContextPropagators.create(W3CTraceContextPropagator.getInstance()))
+                    .buildAndRegisterGlobal();
         }
     }
 
