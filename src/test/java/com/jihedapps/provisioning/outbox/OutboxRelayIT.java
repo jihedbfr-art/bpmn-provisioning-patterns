@@ -12,7 +12,10 @@ import org.camunda.bpm.engine.RuntimeService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -34,11 +37,13 @@ import static org.awaitility.Awaitility.await;
         "provisioning.outbox.relay.enabled=false",
         "camunda.bpm.job-execution.enabled=false",
         "provisioning.outbox.relay.max-attempts=3",
-        "spring.kafka.producer.properties.delivery.timeout.ms=1000",
-        "spring.kafka.producer.properties.request.timeout.ms=500",
-        "spring.kafka.producer.properties.max.block.ms=500"
+        "spring.kafka.producer.properties.delivery.timeout.ms=3000",
+        "spring.kafka.producer.properties.request.timeout.ms=1000",
+        "spring.kafka.producer.properties.max.block.ms=1000",
+        "spring.kafka.producer.properties.linger.ms=0"
 })
 @ActiveProfiles("postgres")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class OutboxRelayIT {
 
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -79,14 +84,17 @@ class OutboxRelayIT {
     @BeforeEach
     void clearOutbox() {
         jdbc.execute("TRUNCATE TABLE portability_outbox");
-        await().atMost(Duration.ofSeconds(15)).ignoreExceptions().untilAsserted(() -> {
+        // Ensure Kafka broker is reachable (may have been paused by a previous test)
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(500)).ignoreExceptions().untilAsserted(() -> {
             try (KafkaConsumer<String, String> c = createConsumer()) {
+                c.poll(Duration.ofMillis(500));
                 assertThat(c.partitionsFor("number-portability-events")).isNotEmpty();
             }
         });
     }
 
     @Test
+    @Order(1)
     void shouldPublishSuccessfullyWhenBrokerIsUp() throws Exception {
         KafkaConsumer<String, String> consumer = createConsumer();
         // Block until partition assignment is complete so we don't miss messages
@@ -124,6 +132,7 @@ class OutboxRelayIT {
     }
 
     @Test
+    @Order(2)
     void shouldRetryAndPublishWhenBrokerRecovers() throws Exception {
         KafkaConsumer<String, String> consumer = createConsumer();
         
@@ -171,6 +180,7 @@ class OutboxRelayIT {
     }
     
     @Test
+    @Order(3)
     void shouldStopBatchAndMarkFailedWhenBrokerIsDown() throws Exception {
         kafka.getDockerClient().pauseContainerCmd(kafka.getContainerId()).exec();
 

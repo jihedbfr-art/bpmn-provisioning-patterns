@@ -46,7 +46,11 @@ import static org.awaitility.Awaitility.await;
         classes = {ProvisioningApplication.class, TracePropagationIT.TestTracingConfig.class},
         properties = {
                 "management.tracing.enabled=true",
-                "provisioning.outbox.relay.enabled=false"
+                "provisioning.outbox.relay.enabled=false",
+                "spring.kafka.producer.properties.delivery.timeout.ms=3000",
+                "spring.kafka.producer.properties.request.timeout.ms=1000",
+                "spring.kafka.producer.properties.max.block.ms=1000",
+                "spring.kafka.producer.properties.linger.ms=0"
         }
 )
 @ActiveProfiles("postgres")
