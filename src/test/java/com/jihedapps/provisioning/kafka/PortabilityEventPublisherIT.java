@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
@@ -46,7 +47,10 @@ class PortabilityEventPublisherIT {
     }
 
     @Autowired
-    private KafkaPortabilityEventPublisher publisher;
+    private PortabilityEventPublisher publisher;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     private KafkaConsumer<String, String> consumer;
 
@@ -70,8 +74,10 @@ class PortabilityEventPublisherIT {
     @Test
     void publishedEventIsReadableFromKafkaWithTheExpectedEnvelope() throws Exception {
         String requestId = "req-" + UUID.randomUUID();
-        publisher.publish("donor.notification.requested", requestId, Map.of(
-                "msisdn", "+21620000000", "donorOperator", "Ooredoo"));
+        transactionTemplate.executeWithoutResult(status -> {
+            publisher.publish("donor.notification.requested", requestId, Map.of(
+                    "msisdn", "+21620000000", "donorOperator", "Ooredoo"));
+        });
 
         ConsumerRecords<String, String> records = pollUntilNotEmpty(consumer, Duration.ofSeconds(20));
         List<ConsumerRecord<String, String>> received = toList(records);

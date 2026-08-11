@@ -45,14 +45,12 @@ public class DonorResponseListener {
             return;
         }
 
-        try {
-            runtimeService.createMessageCorrelation("DonorResponseMessage")
-                    .processInstanceBusinessKey(event.requestId())
-                    .setVariable("donorDecision", event.decision())
-                    .correlateWithResult();
-            
-            LOG.info("Successfully correlated donor response for request {}", event.requestId());
-        } catch (MismatchingMessageCorrelationException e) {
+        long waitingExecutions = runtimeService.createExecutionQuery()
+                .messageEventSubscriptionName("DonorResponseMessage")
+                .processInstanceBusinessKey(event.requestId())
+                .count();
+
+        if (waitingExecutions == 0) {
             HistoricProcessInstance historicProcessInstance = historyService.createHistoricProcessInstanceQuery()
                     .processInstanceBusinessKey(event.requestId())
                     .singleResult();
@@ -72,7 +70,14 @@ public class DonorResponseListener {
             }
 
             LOG.warn("No waiting process instance found for request {}. Event will be rolled back and sent to DLT.", event.requestId());
-            throw e; // Let it bubble up to trigger rollback and DLT recovery
+            throw new MismatchingMessageCorrelationException("DonorResponseMessage", "No process instance found");
         }
+
+        runtimeService.createMessageCorrelation("DonorResponseMessage")
+                .processInstanceBusinessKey(event.requestId())
+                .setVariable("donorDecision", event.decision())
+                .correlateWithResult();
+        
+        LOG.info("Successfully correlated donor response for request {}", event.requestId());
     }
 }

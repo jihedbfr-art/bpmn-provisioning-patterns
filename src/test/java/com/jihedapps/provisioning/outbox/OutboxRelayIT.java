@@ -11,7 +11,11 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.camunda.bpm.engine.RuntimeService;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -33,11 +37,13 @@ import static org.awaitility.Awaitility.await;
         "provisioning.outbox.relay.enabled=false",
         "camunda.bpm.job-execution.enabled=false",
         "provisioning.outbox.relay.max-attempts=3",
-        "spring.kafka.producer.properties.delivery.timeout.ms=1000",
-        "spring.kafka.producer.properties.request.timeout.ms=500",
-        "spring.kafka.producer.properties.max.block.ms=500"
+        "spring.kafka.producer.properties.delivery.timeout.ms=3000",
+        "spring.kafka.producer.properties.request.timeout.ms=1000",
+        "spring.kafka.producer.properties.max.block.ms=1000",
+        "spring.kafka.producer.properties.linger.ms=0"
 })
 @ActiveProfiles("postgres")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class OutboxRelayIT {
 
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -75,9 +81,21 @@ class OutboxRelayIT {
     @Autowired
     ObjectMapper mapper;
 
+    @BeforeEach
+    void clearOutbox() {
+        jdbc.execute("TRUNCATE TABLE portability_outbox");
+        // Ensure Kafka broker is reachable (may have been paused by a previous test)
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(500)).ignoreExceptions().untilAsserted(() -> {
+            try (KafkaConsumer<String, String> c = createConsumer()) {
+                c.poll(Duration.ofMillis(500));
+                assertThat(c.partitionsFor("number-portability-events")).isNotEmpty();
+            }
+        });
+    }
+
     @Test
+    @Order(1)
     void shouldPublishSuccessfullyWhenBrokerIsUp() throws Exception {
-        KafkaConsumer<String, String> consumer = createConsumer();
         String req1 = UUID.randomUUID().toString();
         
         runtimeService.startProcessInstanceByKey("number-portability-saga", req1, Map.of(
@@ -92,19 +110,22 @@ class OutboxRelayIT {
         Integer afterPublish = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
         assertThat(afterPublish).isEqualTo(1);
 
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+        // Create consumer AFTER publishing — auto.offset.reset=earliest reads from offset 0
+        KafkaConsumer<String, String> consumer = createConsumer();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
             assertThat(records.isEmpty()).isFalse();
             ConsumerRecord<String, String> rec = records.iterator().next();
             assertThat(rec.key()).isEqualTo(req1);
             JsonNode node = mapper.readTree(rec.value());
-            assertThat(node.get("eventType").asText()).isEqualTo("PortabilityRequestedEvent");
+            assertThat(node.get("eventType").asText()).isEqualTo("donor.notification.requested");
         });
         
         consumer.close();
     }
 
     @Test
+    @Order(2)
     void shouldRetryAndPublishWhenBrokerRecovers() throws Exception {
         KafkaConsumer<String, String> consumer = createConsumer();
         
@@ -118,15 +139,19 @@ class OutboxRelayIT {
                 "donorResponseTimeout", "PT30M"
         ));
 
-        // Attempt 1 fails
-        outboxRelay.publishBatch();
+        try {
+            System.out.println("DEBUG: records before publishBatch: " + jdbc.queryForList("SELECT * FROM portability_outbox"));
+            // Attempt 1 fails
+            outboxRelay.publishBatch();
+            System.out.println("DEBUG: records after publishBatch: " + jdbc.queryForList("SELECT * FROM portability_outbox"));
 
-        Map<String, Object> record2 = jdbc.queryForMap("SELECT attempts, last_error FROM portability_outbox WHERE aggregate_id = ?", req2);
-        assertThat((Integer) record2.get("attempts")).isEqualTo(1);
-        assertThat(record2.get("last_error")).isNotNull();
-
-        // Restore broker
-        kafka.getDockerClient().unpauseContainerCmd(kafka.getContainerId()).exec();
+            Map<String, Object> record2 = jdbc.queryForMap("SELECT attempts, last_error FROM portability_outbox WHERE aggregate_id = ?", req2);
+            assertThat((Integer) record2.get("attempts")).isEqualTo(1);
+            assertThat(record2.get("last_error")).isNotNull();
+        } finally {
+            // Restore broker
+            kafka.getDockerClient().unpauseContainerCmd(kafka.getContainerId()).exec();
+        }
 
         // Keep trying to publish until it succeeds (Kafka might take a moment to be fully ready)
         await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
@@ -148,6 +173,7 @@ class OutboxRelayIT {
     }
     
     @Test
+    @Order(3)
     void shouldStopBatchAndMarkFailedWhenBrokerIsDown() throws Exception {
         kafka.getDockerClient().pauseContainerCmd(kafka.getContainerId()).exec();
 

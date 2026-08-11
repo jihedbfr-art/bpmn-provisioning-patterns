@@ -1,7 +1,13 @@
 package com.jihedapps.provisioning.outbox;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import org.springframework.beans.factory.ObjectProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,7 +23,6 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 @Component
-@ConditionalOnProperty(name = "provisioning.outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxRelay {
 
     private static final Logger LOG = LoggerFactory.getLogger(OutboxRelay.class);
@@ -25,9 +30,13 @@ public class OutboxRelay {
     private final OutboxRepository repository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final JdbcTemplate jdbcTemplate;
+    private final Tracer tracer;
+    private final Propagator propagator;
+    private final ObjectMapper mapper;
     private final String topic;
     private final int batchSize;
     private final int metricsInterval;
+    private final boolean enabled;
     
     private int cycleCount = 0;
     private final Duration sendTimeout;
@@ -38,17 +47,25 @@ public class OutboxRelay {
                        KafkaTemplate<String, String> kafkaTemplate,
                        JdbcTemplate jdbcTemplate,
                        MeterRegistry meterRegistry,
+                       @org.springframework.context.annotation.Lazy Tracer tracer,
+                       @org.springframework.context.annotation.Lazy Propagator propagator,
+                       ObjectMapper mapper,
                        @Value("${provisioning.kafka.topic:number-portability-events}") String topic,
                        @Value("${provisioning.outbox.relay.send-timeout:PT6S}") Duration sendTimeout,
                        @Value("${provisioning.outbox.relay.batch-size:10}") int batchSize,
-                       @Value("${provisioning.outbox.relay.metrics-interval:30}") int metricsInterval) {
+                       @Value("${provisioning.outbox.relay.metrics-interval:30}") int metricsInterval,
+                       @Value("${provisioning.outbox.relay.enabled:true}") boolean enabled) {
         this.repository = repository;
         this.kafkaTemplate = kafkaTemplate;
         this.jdbcTemplate = jdbcTemplate;
+        this.tracer = tracer;
+        this.propagator = propagator;
+        this.mapper = mapper;
         this.topic = topic;
         this.sendTimeout = sendTimeout;
         this.batchSize = batchSize;
         this.metricsInterval = metricsInterval;
+        this.enabled = enabled;
 
         this.pendingGauge = meterRegistry.gauge("provisioning.outbox.pending", new java.util.concurrent.atomic.AtomicInteger(0));
         this.deadGauge = meterRegistry.gauge("provisioning.outbox.dead", new java.util.concurrent.atomic.AtomicInteger(0));
@@ -56,13 +73,20 @@ public class OutboxRelay {
 
     /**
      * Polling publisher reading the outbox table.
-     * Note: Ordering by aggregate_id is roughly preserved by SKIP LOCKED, but multi-instance relays
-     * could interleave messages. The broker partition key will maintain order for what it receives,
-     * but we do not guarantee strict global event ordering here, only at-least-once delivery.
+     * Note: SKIP LOCKED skips locked rows to allow parallel processing across multiple relay instances,
+     * which does not guarantee strict global event ordering across partitions, only at-least-once delivery.
      */
     @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}")
-    @Transactional(timeout = 30)
+    public void scheduledPublishBatch() {
+        if (!enabled) {
+            return;
+        }
+        publishBatch();
+    }
+
+    @Transactional(timeout = 60)
     public void publishBatch() {
+
         if (cycleCount++ % metricsInterval == 0) {
             updateMetrics();
         }
@@ -75,7 +99,22 @@ public class OutboxRelay {
         LOG.debug("Publishing {} outbox records", batch.size());
 
         for (OutboxRecord record : batch) {
+            Span span = null;
+            Tracer.SpanInScope scope = null;
             try {
+                if (record.traceContext() != null && !record.traceContext().isBlank()) {
+                    try {
+                        java.util.Map<String, String> carrier = mapper.readValue(record.traceContext(), new TypeReference<>() {});
+                        Span.Builder builder = propagator.extract(carrier, java.util.Map::get);
+                        span = builder.name("outbox-publish").start();
+                        span.tag("messaging.destination", topic);
+                        span.tag("outbox.attempts", String.valueOf(record.attempts() + 1));
+                        scope = tracer.withSpan(span);
+                    } catch (Exception e) {
+                        LOG.warn("Failed to extract trace context for record {}", record.id(), e);
+                    }
+                }
+
                 // Synchronous send to ensure we don't mark as published if the broker is down
                 kafkaTemplate.send(topic, record.aggregateId(), record.payload())
                              .get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -83,11 +122,18 @@ public class OutboxRelay {
             } catch (Exception e) {
                 LOG.error("Failed to publish outbox record {}", record.id(), e);
                 repository.markFailed(record.id(), e.getMessage());
-                // Un enregistrement en échec déterministe (payload trop gros, etc.) bloque la tête de file pendant max-attempts cycles.
-                // C'est le bon compromis : si le broker est injoignable, on sort pour limiter le temps de transaction.
-                // Le remplacer par 'continue' empêcherait le timeout de transaction global, mais ruinerait l'incrémentation des tentatives
-                // si le broker est réellement indisponible pour tout le batch.
+                // A deterministically failing record (e.g., payload too large) blocks the head of the queue for max-attempts cycles.
+                // This is an acceptable tradeoff: if the broker is unreachable, we exit early to limit transaction time.
+                // Replacing this with 'continue' would prevent global transaction timeouts, but it would ruin attempt counting
+                // if the broker is actually down for the entire batch.
                 break; // Stop processing batch if broker is down to prevent transaction timeout
+            } finally {
+                if (scope != null) {
+                    scope.close();
+                }
+                if (span != null) {
+                    span.end();
+                }
             }
         }
     }
