@@ -118,7 +118,7 @@ class OutboxRelayIT {
             ConsumerRecord<String, String> rec = records.iterator().next();
             assertThat(rec.key()).isEqualTo(req1);
             JsonNode node = mapper.readTree(rec.value());
-            assertThat(node.get("eventType").asText()).isEqualTo("PortabilityRequestedEvent");
+            assertThat(node.get("eventType").asText()).isEqualTo("donor.notification.requested");
         });
         
         consumer.close();
