@@ -97,10 +97,16 @@ class OutboxRelayIT {
                 "donorResponseTimeout", "PT30M"
         ));
 
-        outboxRelay.publishBatch();
-
-        Integer afterPublish = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
-        assertThat(afterPublish).isEqualTo(1);
+        // publishBatch takes the ten oldest unpublished rows (ORDER BY created_at LIMIT
+        // batch-size). shouldStopBatchAndMarkFailedWhenBrokerIsDown deliberately leaves
+        // fifteen rows behind, so depending on method order a single call here drains
+        // those leftovers and never reaches req1. Draining in a loop, like
+        // shouldRetryAndPublishWhenBrokerRecovers does, makes this independent of order.
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
+            outboxRelay.publishBatch();
+            Integer published = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
+            assertThat(published).isEqualTo(1);
+        });
 
         // Every test in this class publishes to the same topic, so a poll can return a
         // batch holding other tests' records. Scanning the whole batch matters: taking
