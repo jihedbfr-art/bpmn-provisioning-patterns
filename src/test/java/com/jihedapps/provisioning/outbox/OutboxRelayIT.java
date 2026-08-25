@@ -102,12 +102,21 @@ class OutboxRelayIT {
         Integer afterPublish = jdbc.queryForObject("SELECT count(*) FROM portability_outbox WHERE aggregate_id = ? AND published_at IS NOT NULL", Integer.class, req1);
         assertThat(afterPublish).isEqualTo(1);
 
+        // Every test in this class publishes to the same topic, so a poll can return a
+        // batch holding other tests' records. Scanning the whole batch matters: taking
+        // only iterator().next() consumed req1 inside a batch where it was not first and
+        // then lost it, because the offset had already moved past it on the next poll.
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
-            assertThat(records.isEmpty()).isFalse();
-            ConsumerRecord<String, String> rec = records.iterator().next();
-            assertThat(rec.key()).isEqualTo(req1);
-            JsonNode node = mapper.readTree(rec.value());
+            ConsumerRecord<String, String> mine = null;
+            for (ConsumerRecord<String, String> rec : records) {
+                if (req1.equals(rec.key())) {
+                    mine = rec;
+                    break;
+                }
+            }
+            assertThat(mine).isNotNull();
+            JsonNode node = mapper.readTree(mine.value());
             assertThat(node.get("eventType").asText()).isEqualTo("PortabilityRequestedEvent");
         });
         
