@@ -10,7 +10,6 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.camunda.bpm.engine.RuntimeService;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,18 +47,24 @@ class OutboxRelayIT {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
     static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
 
+    // Started here rather than in @BeforeAll on purpose. SpringExtension is a
+    // BeforeAllCallback, so it builds the application context before any user @BeforeAll
+    // method runs — @DynamicPropertySource would then read getBootstrapServers() off a
+    // container that has not started, KafkaAdmin would fail to create the topics
+    // ("Timed out waiting for a node assignment"), and the consumer would sit on a topic
+    // that only appears later through producer auto-creation. A static initialiser runs
+    // at class load, before the extension.
+    static {
+        postgres.start();
+        kafka.start();
+    }
+
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-    }
-
-    @BeforeAll
-    static void startContainers() {
-        postgres.start();
-        kafka.start();
     }
 
     @AfterAll
