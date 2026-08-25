@@ -46,7 +46,12 @@ public class OutboxRepository {
     }
 
     public void markFailed(String id, String error) {
-        jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ?, failed_at = CASE WHEN attempts + 1 >= ? THEN ? ELSE NULL END WHERE id = ?", 
+        // The timestamp parameter is cast explicitly: inside CASE ... THEN ? ELSE NULL END
+        // neither branch carries a type, so PostgreSQL infers text for the placeholder and
+        // rejects the assignment to a timestamp column ("column failed_at is of type
+        // timestamp without time zone but expression is of type text"). H2 was lenient
+        // about it, which is why the dialect test never caught this.
+        jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ?, failed_at = CASE WHEN attempts + 1 >= ? THEN CAST(? AS timestamp) ELSE NULL END WHERE id = ?",
                 error, maxAttempts, Timestamp.from(Instant.now()), id);
     }
 
