@@ -29,8 +29,13 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+// The relay bean must exist here — this test drives publishBatch() by hand to assert
+// batch behaviour deterministically. It only needs the *schedule* off, not the bean, so
+// it pushes the first run an hour out instead of setting relay.enabled=false, which
+// would remove the very bean the test autowires.
 @SpringBootTest(classes = ProvisioningApplication.class, properties = {
-        "provisioning.outbox.relay.enabled=false",
+        "provisioning.outbox.relay.initial-delay=PT1H",
+        "provisioning.outbox.relay.interval=PT1H",
         "camunda.bpm.job-execution.enabled=false",
         "provisioning.outbox.relay.max-attempts=3",
         "spring.kafka.producer.properties.delivery.timeout.ms=1000",
