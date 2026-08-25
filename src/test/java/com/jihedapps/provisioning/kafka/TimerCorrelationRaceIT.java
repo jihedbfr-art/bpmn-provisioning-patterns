@@ -7,7 +7,6 @@ import org.camunda.bpm.engine.RuntimeService;
 import org.camunda.bpm.engine.TaskService;
 import org.camunda.bpm.engine.history.HistoricProcessInstance;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,6 +16,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.kafka.KafkaContainer;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -34,18 +34,20 @@ class TimerCorrelationRaceIT {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine");
     static KafkaContainer kafka = new KafkaContainer("apache/kafka:3.8.0");
 
+    // Started at class load, not in @BeforeAll: SpringExtension is a BeforeAllCallback
+    // and builds the context first, so @DynamicPropertySource would otherwise read
+    // getBootstrapServers() off a container that has not started yet.
+    static {
+        postgres.start();
+        kafka.start();
+    }
+
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
-    }
-
-    @BeforeAll
-    static void startContainers() {
-        postgres.start();
-        kafka.start();
     }
 
     @AfterAll

@@ -60,7 +60,8 @@ public class OutboxRelay {
      * could interleave messages. The broker partition key will maintain order for what it receives,
      * but we do not guarantee strict global event ordering here, only at-least-once delivery.
      */
-    @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}")
+    @Scheduled(fixedDelayString = "${provisioning.outbox.relay.interval:PT1S}",
+               initialDelayString = "${provisioning.outbox.relay.initial-delay:PT0S}")
     @Transactional(timeout = 30)
     public void publishBatch() {
         if (cycleCount++ % metricsInterval == 0) {
