@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/jihedbfr-art/bpmn-provisioning-patterns/actions/workflows/ci.yml/badge.svg)](https://github.com/jihedbfr-art/bpmn-provisioning-patterns/actions)
 
+[Version française](./README.fr.md)
+
 Most public Camunda examples are pizza orders: order placed, payment charged, pizza delivered,
 the end. Real orchestration has none of that tidiness — external systems that don't answer,
 SLAs that force a decision anyway, and rollbacks that have to undo work that already happened.
