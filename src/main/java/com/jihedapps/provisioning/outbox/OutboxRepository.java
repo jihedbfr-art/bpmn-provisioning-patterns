@@ -26,7 +26,7 @@ public class OutboxRepository {
     }
 
     public void insert(OutboxRecord record) {
-        jdbc.update("INSERT INTO portability_outbox (id, aggregate_id, event_type, payload, created_at, published_at, attempts, last_error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO portability_outbox (id, aggregate_id, event_type, payload, created_at, published_at, attempts, last_error, trace_context) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 record.id(),
                 record.aggregateId(),
                 record.eventType(),
@@ -34,7 +34,8 @@ public class OutboxRepository {
                 record.createdAt() != null ? Timestamp.from(record.createdAt()) : null,
                 record.publishedAt() != null ? Timestamp.from(record.publishedAt()) : null,
                 record.attempts(),
-                record.lastError());
+                record.lastError(),
+                record.traceContext());
     }
 
     public List<OutboxRecord> lockUnpublishedBatch(int limit) {
@@ -46,13 +47,17 @@ public class OutboxRepository {
     }
 
     public void markFailed(String id, String error) {
-        // The timestamp parameter is cast explicitly: inside CASE ... THEN ? ELSE NULL END
-        // neither branch carries a type, so PostgreSQL infers text for the placeholder and
-        // rejects the assignment to a timestamp column ("column failed_at is of type
-        // timestamp without time zone but expression is of type text"). H2 was lenient
-        // about it, which is why the dialect test never caught this.
+        // Both sides of this merge found the same typing bug independently: inside
+        // CASE ... THEN ? ELSE NULL END neither branch carries a type, so PostgreSQL infers text
+        // for the placeholder and rejects the assignment to a timestamp column ("column failed_at
+        // is of type timestamp without time zone but expression is of type text"). H2 was lenient
+        // about it, which is why running the tests on H2 alone never caught it.
+        //
+        // The truncation comes from the tracing branch: last_error is VARCHAR(2000), and a stack
+        // trace overflows it long before anyone reads the column.
+        String truncatedError = error != null && error.length() > 2000 ? error.substring(0, 2000) : error;
         jdbc.update("UPDATE portability_outbox SET attempts = attempts + 1, last_error = ?, failed_at = CASE WHEN attempts + 1 >= ? THEN CAST(? AS timestamp) ELSE NULL END WHERE id = ?",
-                error, maxAttempts, Timestamp.from(Instant.now()), id);
+                truncatedError, maxAttempts, Timestamp.from(Instant.now()), id);
     }
 
     private final RowMapper<OutboxRecord> outboxRowMapper = (rs, rowNum) -> new OutboxRecord(
@@ -63,6 +68,7 @@ public class OutboxRepository {
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("published_at") != null ? rs.getTimestamp("published_at").toInstant() : null,
             rs.getInt("attempts"),
-            rs.getString("last_error")
+            rs.getString("last_error"),
+            rs.getString("trace_context")
     );
 }
