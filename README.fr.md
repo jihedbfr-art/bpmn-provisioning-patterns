@@ -206,7 +206,9 @@ curl -X POST localhost:8080/api/bulk-provisioning \
 ```
 
 `rollbackThreshold` est optionnel (par défaut `provisioning.bulk-sim.default-rollback-threshold`,
-0.2). Vérifiez le statut de la même façon : `curl localhost:8080/api/bulk-provisioning/{batchId}`.
+0.2). Le rollback intervient uniquement si le taux d'échec est **supérieur** au seuil. Lorsque
+les deux sont égaux, le lot se termine avec les ICCID en échec signalés, sans déprovisionnement.
+Vérifiez le statut avec `curl localhost:8080/api/bulk-provisioning/{batchId}`.
 
 ## Tests
 
@@ -228,8 +230,8 @@ démarre le contexte Spring complet contre un vrai broker Kafka via Testcontaine
 `StuckSagaReconciliationServiceTest` couvre à la fois une saga fraîche (non signalée) et une
 poussée au-delà du seuil de blocage, via la même manipulation d'horloge que le test de SLA.
 `BulkSimProvisioningTest` couvre les cas succès total, taux d'échec au-dessus du seuil (rollback,
-et seuls les ICCID ayant réussi sont déprovisionnés), et taux d'échec en dessous du seuil (succès
-partiel accepté, pas de rollback) — avec la gateway mockée pour faire échouer des ICCID précis de
+et seuls les ICCID ayant réussi sont déprovisionnés), et taux d'échec en dessous ou exactement au
+seuil (succès partiel accepté, pas de rollback) — avec la gateway mockée pour faire échouer des ICCID précis de
 façon déterministe plutôt qu'aléatoire.
 
 ## Roadmap
