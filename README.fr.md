@@ -231,6 +231,10 @@ poussée au-delà du seuil de blocage, via la même manipulation d'horloge que l
 et seuls les ICCID ayant réussi sont déprovisionnés), et taux d'échec en dessous du seuil (succès
 partiel accepté, pas de rollback) — avec la gateway mockée pour faire échouer des ICCID précis de
 façon déterministe plutôt qu'aléatoire.
+Pour le rollback, le test vérifie aussi l'unique événement `sim.deprovisioned` : il contient
+l'ICCID qui avait réussi, l'identifiant du lot et le motif `BATCH_ROLLED_BACK`. La livraison
+Kafka est testée séparément ; cette assertion établit ce que le processus demande au publisher
+d'émettre.
 
 ## Roadmap
 

@@ -18,7 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.kafka.admin.auto-create=false")
 class BulkSimProvisioningTest {
 
     private static final String PROCESS_KEY = "bulk-sim-provisioning";
@@ -66,7 +66,7 @@ class BulkSimProvisioningTest {
     }
 
     @Test
-    void failureRateAboveThresholdRollsBackOnlyTheSuccessfulOnes() {
+    void failureRateAboveThresholdEmitsCompensationOnlyForSuccessfulSims() {
         when(gateway.provision(eq("sim-1"), any())).thenReturn(true);
         when(gateway.provision(eq("sim-2"), any())).thenReturn(false);
         when(gateway.provision(eq("sim-3"), any())).thenReturn(false);
@@ -82,6 +82,9 @@ class BulkSimProvisioningTest {
         verify(gateway, times(1)).deprovision("sim-1");
         verify(gateway, never()).deprovision("sim-2");
         verify(gateway, never()).deprovision("sim-3");
+        verify(publisher).publish("sim.deprovisioned", batchId,
+                Map.of("iccid", "sim-1", "reason", "BATCH_ROLLED_BACK"));
+        verify(publisher, times(1)).publish(eq("sim.deprovisioned"), eq(batchId), any());
     }
 
     @Test
