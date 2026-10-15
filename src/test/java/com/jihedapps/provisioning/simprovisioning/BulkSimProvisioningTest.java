@@ -18,7 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.kafka.admin.auto-create=false")
 class BulkSimProvisioningTest {
 
     private static final String PROCESS_KEY = "bulk-sim-provisioning";
@@ -96,6 +96,24 @@ class BulkSimProvisioningTest {
         runtimeService.startProcessInstanceByKey(PROCESS_KEY, batchId, Map.of(
                 "simRequests", simRequests("sim-1", "sim-2", "sim-3", "sim-4"),
                 "rollbackThreshold", 0.3
+        ));
+
+        assertThat(endActivityId(batchId)).isEqualTo("completed");
+        verify(gateway, never()).deprovision(any());
+        verify(publisher).publish(eq("sim.provisioning_failed"), eq(batchId), any());
+    }
+
+    @Test
+    void failureRateEqualToThresholdAcceptsPartialSuccessWithoutRollback() {
+        when(gateway.provision(eq("sim-1"), any())).thenReturn(true);
+        when(gateway.provision(eq("sim-2"), any())).thenReturn(true);
+        when(gateway.provision(eq("sim-3"), any())).thenReturn(true);
+        when(gateway.provision(eq("sim-4"), any())).thenReturn(false);
+        String batchId = UUID.randomUUID().toString();
+
+        runtimeService.startProcessInstanceByKey(PROCESS_KEY, batchId, Map.of(
+                "simRequests", simRequests("sim-1", "sim-2", "sim-3", "sim-4"),
+                "rollbackThreshold", 0.25
         ));
 
         assertThat(endActivityId(batchId)).isEqualTo("completed");
