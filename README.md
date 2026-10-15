@@ -185,7 +185,9 @@ curl -X POST localhost:8080/api/bulk-provisioning \
 ```
 
 `rollbackThreshold` is optional (defaults to `provisioning.bulk-sim.default-rollback-threshold`,
-0.2). Check status the same way: `curl localhost:8080/api/bulk-provisioning/{batchId}`.
+0.2). Rollback occurs only when the failure rate is **greater than** the threshold. At exactly
+the threshold, the batch completes with its failed ICCIDs reported and no deprovisioning.
+Check status with `curl localhost:8080/api/bulk-provisioning/{batchId}`.
 
 ## Testing
 
@@ -204,8 +206,8 @@ to confirm the producer config and JSON envelope are actually right.
 `StuckSagaReconciliationServiceTest` covers both a fresh saga (not reported) and one pushed past
 the stuck threshold via the same clock-manipulation approach as the SLA test.
 `BulkSimProvisioningTest` covers all-success, failure-rate-above-threshold (rollback, and only
-the successful ICCIDs get deprovisioned), and failure-rate-below-threshold (partial success
-accepted, no rollback) — with the gateway mocked to fail specific ICCIDs deterministically rather
+the successful ICCIDs get deprovisioned), and failure rates below or exactly at the threshold
+(partial success accepted, no rollback) — with the gateway mocked to fail specific ICCIDs deterministically rather
 than randomly.
 For the rollback path, the test also checks the single `sim.deprovisioned` event: it carries the
 successful ICCID, the batch ID and the `BATCH_ROLLED_BACK` reason. Kafka delivery is tested
