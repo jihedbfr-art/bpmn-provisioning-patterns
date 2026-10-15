@@ -209,6 +209,9 @@ the stuck threshold via the same clock-manipulation approach as the SLA test.
 the successful ICCIDs get deprovisioned), and failure rates below or exactly at the threshold
 (partial success accepted, no rollback) — with the gateway mocked to fail specific ICCIDs deterministically rather
 than randomly.
+For the rollback path, the test also checks the single `sim.deprovisioned` event: it carries the
+successful ICCID, the batch ID and the `BATCH_ROLLED_BACK` reason. Kafka delivery is tested
+separately; this assertion proves what the process asks its publisher to emit.
 
 ## Roadmap
 
